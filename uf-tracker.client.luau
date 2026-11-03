@@ -14,7 +14,7 @@ if previous then
     previous:Destroy()
 end
 
-local config = { radius = 20, sampleHz = 30, jumpSpeed = 250, maxEvents = 400 }
+local config = { radius = 20, sampleHz = 30, jumpSpeed = 250, maxEvents = 400, approachSeconds = 0.10, holdSeconds = 0.20 }
 local running, closed, visible = true, false, true
 local records, boxes, connections, events = {}, {}, {}, {}
 local nextId, eventCount, lastSample, lastDiscovery, lastUi = 0, 0, 0, 0, 0
@@ -235,7 +235,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v4", 12, 4, 120, 26)
+local title = label("UF · CATCH v5", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -347,7 +347,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 4, build = "heartbeat-timing-fix-v4", placeId = tostring(game.PlaceId),
+    local data = { schema = 5, build = "slow-approach-hold-v5", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
@@ -358,7 +358,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v4\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v5\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -424,6 +424,43 @@ connect(UserInputService.InputChanged, function(input)
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
+local function updatePendingMove(now)
+    local saved = pendingMove
+    if not saved then return end
+    if not running or closed then restoreMove("disabled"); return end
+    if player.Character ~= saved.character or not saved.root:IsDescendantOf(saved.character)
+        or saved.humanoid.Health <= 0 or saved.humanoid.Sit then
+        restoreMove("character_unavailable"); return
+    end
+    local record = records[saved.ball]
+    if not record or not saved.ball:IsDescendantOf(Workspace) then restoreMove("ball_ended"); return end
+    if record.associated then restoreMove("player_association_observed"); return end
+    if saved.ball.Anchored then restoreMove("ball_anchored"); return end
+    local elapsed = now - saved.attemptAt
+    if elapsed >= config.approachSeconds + config.holdSeconds then restoreMove("hold_completed"); return end
+    local alpha = math.clamp(elapsed / config.approachSeconds, 0, 1)
+    local target = CFrame.new(saved.ball.Position - saved.catchOffset) * saved.cframe.Rotation
+    local ok, err = pcall(function()
+        -- Track the live ball instead of a position that is already one frame old.
+        saved.root.CFrame = saved.cframe:Lerp(target, alpha)
+        saved.root.AssemblyLinearVelocity = Vector3.zero
+        saved.root.AssemblyAngularVelocity = Vector3.zero
+    end)
+    if not ok then
+        emit("catch_movement_error", record, { error = tostring(err) })
+        restoreMove("movement_error")
+        return
+    end
+    if not saved.moved then
+        saved.moved = true
+        emit("catch_movement_started", record, { localMoveApplied = true, elapsed = elapsed })
+    end
+    if alpha >= 1 and not saved.arrived then
+        saved.arrived = true
+        emit("catch_arrived", record, { elapsed = elapsed, rootPosition = vector(saved.root.Position),
+            ballPosition = vector(saved.ball.Position), catchOffset = vector(saved.catchOffset) })
+    end
+end
 connect(player.CharacterRemoving, function() restoreMove("character_removing") end)
 connect(boundary.Event, function(payload)
     if closed or not running then return end
@@ -449,31 +486,33 @@ connect(boundary.Event, function(payload)
         emit("catch_attempt_skipped", record, { id = payload.id, reason = reason })
         return
     end
+    local catchOffset = Vector3.zero
+    local catchboxPath
+    for box, entry in pairs(boxes) do
+        if entry.owner == player.Name and validBox(box) then
+            catchOffset, catchboxPath = box.Position - root.Position, box:GetFullName()
+            break
+        end
+    end
     pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
-        attemptAt = os.clock(), heartbeat = heartbeatIndex,
+        attemptAt = os.clock(), heartbeat = heartbeatIndex, ball = ball, catchOffset = catchOffset,
         cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
-    local target = ball.Position
     attemptCount = attemptCount + 1
-    local ok, err = pcall(function()
-        root.CFrame = CFrame.new(target) * root.CFrame.Rotation
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end)
     resetBoundaries()
-    emit("catch_attempt", record, { position = vector(target), localMoveApplied = ok,
-        error = err and tostring(err), outcome = "unconfirmed" })
-    if not ok then restoreMove("movement_error") end
+    emit("catch_attempt", record, { position = vector(ball.Position), movementPending = true,
+        approachSeconds = config.approachSeconds, holdSeconds = config.holdSeconds,
+        catchboxPath = catchboxPath, catchOffset = vector(catchOffset),
+        catchInput = "No verified automatic catch input binding", outcome = "unconfirmed" })
 end)
 connect(Workspace.DescendantAdded, function(item)
     if item.Name == "Football" then registerBall(item)
     elseif item.Name == "CatchBox" then registerBox(item) end
 end)
--- One callback owns both return and detection: restoration always precedes any
--- new attempt in this dispatch, regardless of signal listener execution order.
+-- A single callback advances the slower approach/hold and then samples detection.
 connect(RunService.Heartbeat, function()
     heartbeatIndex = heartbeatIndex + 1
-    if pendingMove then restoreMove("following_heartbeat") end
     local now = os.clock()
+    updatePendingMove(now)
     if now - lastDiscovery >= 1 then lastDiscovery = now; discover() end
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -501,7 +540,7 @@ connect(RunService.Heartbeat, function()
             setGate(record, record.triggered and "already_triggered" or (jump and "ball_position_jump"
                 or (rootJump and "player_position_jump" or (ball.Anchored and "anchored"
                 or (not eligible and "speed_at_or_below_5" or "outside_orb")))))
-            if not record.triggered and not jump and not rootJump and eligible
+            if not pendingMove and not record.triggered and not jump and not rootJump and eligible
                 and entersOrb(record.relative, relative, config.radius, validSegment) then
                 record.triggered, record.state = true, "APPROACHING"
                 setGate(record, "boundary_triggered")
@@ -520,9 +559,10 @@ connect(RunService.Heartbeat, function()
     end
     if now - lastUi >= 0.2 then
         lastUi = now
-        status.Text = runtimeError and ("ERROR · " .. runtimeError) or (not running and "OFF · orb disabled" or (nearestRecord
+        status.Text = runtimeError and ("ERROR · " .. runtimeError) or (pendingMove
+            and (pendingMove.arrived and "Holding at ball · tries " or "Approaching ball · tries ") .. attemptCount or (not running and "OFF · orb disabled" or (nearestRecord
             and string.format("%s %.0f studs · tries %d", nearestRecord.id, nearestDistance, attemptCount)
-            or (fieldContainer() and ("No ball · tries " .. attemptCount) or "UF match path not found")))
+            or (fieldContainer() and ("No ball · tries " .. attemptCount) or "UF match path not found"))))
     end
 end)
 discover()
