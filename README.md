@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v13 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v14 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - TEST + COPY runs the standalone input test and automatically generates/displays a report after 0.5 seconds; it also works with tracking OFF.
@@ -125,7 +125,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v13`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v14`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -308,3 +308,16 @@ open the keyboard. Clipboard failure still opens selectable text.
 Tests cover a single combined activation, automatic delayed capture, matching clipboard
 and displayed contents, unique report IDs, and a clipboard function that silently keeps
 old contents. This workflow change does not establish working UF auto-catching.
+
+## v14 explicit TextBox output
+
+The result TextBox now starts with an empty Text value and an explicit placeholder,
+preventing Roblox's default TextBox label from appearing as a report. TEST + COPY
+immediately displays Running input test and schedules export with task.delay before
+attempting input. Export is independent of the tracking Heartbeat; input or generation
+failures produce visible REPORT ERROR text or a smaller diagnostic report. Repeated
+tests supersede prior timers, and closing invalidates delayed output.
+
+The mock now starts TextBoxes with Roblox's default label and verifies it is cleared,
+then checks immediate progress, delayed output without any tracking Heartbeat, and
+cleanup. Catch activation remains unverified; this change repairs the reporting flow.
