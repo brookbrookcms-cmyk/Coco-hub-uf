@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v8 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v9 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Tap sends a standalone input test without moving the character; it also works with tracking OFF.
@@ -124,7 +124,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v8`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v9`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -216,3 +216,19 @@ method, errors and dispatch status. This avoids needing another full pass to est
 basic input support. Mock tests cover paired engine touch, manual Tap, removal of the
 obsolete signal route, mouse fallback and unavailable input. Actual animation and catch
 behavior remain unverified outside the user's client.
+
+## v9 coordinate feedback correction
+
+The v8 live report showed test-tap Y coordinates decreasing by exactly 58 pixels on
+successive presses. Injected TouchTap events were being accepted as new real-tap
+positions, creating a GUI-inset feedback loop. v9 excludes TouchTap observations for
+0.35 seconds after injection and adds GuiService:GetGuiInset once when converting the
+chosen GUI/touch point to engine screen coordinates. Real taps during that short window
+are also intentionally excluded from replay-target recording. The exclusion does not
+block UF's input handlers; it only affects this script's observer.
+
+Copy Result now includes ignored-event count, last injected screen point, and per-event
+GUI point, screen point and inset. The regression mock uses a 58-pixel inset, generates
+TouchTap from injected engine touch events, and checks repeated test presses for stable
+coordinates and correct classification. The live catch animation/acceptance still has
+not been established. No successful dispatch is reported as a confirmed catch.
