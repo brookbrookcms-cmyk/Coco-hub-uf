@@ -265,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v11", 12, 4, 120, 26)
+local title = label("UF · CATCH v12", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -341,10 +341,74 @@ report.Size, report.Position = UDim2.fromOffset(210, 150), UDim2.fromOffset(0, 1
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
+-- Report encoding helpers. Never let one bad diagnostic value disable export.
+local function jsonSafe(value, seen, depth, warnings, path, budget)
+    local function mark(reason)
+        if #warnings < 50 then table.insert(warnings, path .. ": " .. reason) end
+    end
+    budget.remaining = budget.remaining - 1
+    if budget.remaining < 0 then mark("report size limit"); return "<truncated>" end
+    local kind = type(value)
+    if kind == "nil" or kind == "boolean" or kind == "string" then return value end
+    if kind == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then
+            mark("non-finite number"); return "<non-finite number>"
+        end
+        return value
+    end
+    if kind ~= "table" then mark("converted " .. kind); return tostring(value) end
+    if seen[value] then mark("cycle to " .. seen[value]); return "<cycle>" end
+    if depth >= 16 then mark("depth limit"); return "<depth limit>" end
+    seen[value] = path
+    local count, maxIndex, isArray = 0, 0, true
+    for key in pairs(value) do
+        count = count + 1
+        if type(key) ~= "number" or key < 1 or key % 1 ~= 0 or key == math.huge then isArray = false
+        else maxIndex = math.max(maxIndex, key) end
+    end
+    isArray = isArray and maxIndex == count
+    local out = {}
+    for key, entry in pairs(value) do
+        if budget.remaining <= 0 then mark("report size limit"); break end
+        local safeKey = isArray and key or tostring(key)
+        if not isArray and type(key) ~= "string" then mark("converted dictionary key") end
+        if out[safeKey] ~= nil then mark("dictionary key collision: " .. tostring(safeKey)) end
+        out[safeKey] = jsonSafe(entry, seen, depth + 1, warnings, path .. "." .. tostring(safeKey), budget)
+    end
+    seen[value] = nil
+    return out
+end
+local function plainReport(value)
+    local lines = {}
+    local function visit(entry, path)
+        if #lines >= 3000 then return end
+        if type(entry) ~= "table" then
+            table.insert(lines, path .. " = " .. tostring(entry))
+            return
+        end
+        local keys = {}
+        for key in pairs(entry) do table.insert(keys, key) end
+        table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
+        if #keys == 0 then table.insert(lines, path .. " = {}") end
+        for _, key in ipairs(keys) do visit(entry[key], path .. "." .. tostring(key)) end
+    end
+    visit(value, "result")
+    if #lines >= 3000 then table.insert(lines, "<plain-text line limit reached>") end
+    return table.concat(lines, "\n")
+end
+local function encodeResult(data)
+    local warnings = {}
+    local clean = jsonSafe(data, {}, 0, warnings, "result", { remaining = 20000 })
+    clean.serializationWarnings = warnings
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(clean) end)
+    if ok and type(encoded) == "string" then return "UF COPY RESULT v12\n" .. encoded end
+    return "UF COPY RESULT v12\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
+        .. "\n" .. plainReport(clean)
+end
 local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
 local ignoreTapUntil, ignoredSyntheticTaps = 0, 0
 local lastInjectedScreenPoint
-local function buildResult()
+local function collectResult()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -380,7 +444,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 11, build = "clear-target-input-v11", placeId = tostring(game.PlaceId),
+    local data = { schema = 12, build = "robust-copy-result-v12", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -396,7 +460,15 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v11\n" .. HttpService:JSONEncode(data)
+    return data
+end
+local function buildResult()
+    local ok, data = pcall(collectResult)
+    if not ok then
+        data = { schema = 12, build = "robust-copy-result-v12", collectionError = tostring(data),
+            lastError = runtimeError, events = events, callbackErrors = callbackErrors, attempts = attemptCount }
+    end
+    return encodeResult(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
