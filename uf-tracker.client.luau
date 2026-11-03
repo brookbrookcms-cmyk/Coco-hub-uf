@@ -19,6 +19,7 @@ local running, closed, visible = true, false, true
 local records, boxes, connections, events = {}, {}, {}, {}
 local nextId, eventCount, lastSample, lastDiscovery, lastUi = 0, 0, 0, 0, 0
 local started = os.clock()
+local heartbeatIndex = 0
 local runtimeError, errorAt, attemptCount = nil, 0, 0
 local status
 local callbackErrors = {}
@@ -80,6 +81,8 @@ local function restoreMove(reason)
     end
     resetBoundaries()
     emit("catch_attempt_return", nil, { id = saved.id, reason = reason, restored = ok,
+        heldSeconds = saved.attemptAt and os.clock() - saved.attemptAt,
+        heartbeatDelta = saved.heartbeat and heartbeatIndex - saved.heartbeat,
         error = err and tostring(err) })
 end
 local function setGate(record, reason)
@@ -232,7 +235,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v3", 12, 4, 120, 26)
+local title = label("UF · CATCH v4", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -344,7 +347,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 3, build = "copy-result-v3", placeId = tostring(game.PlaceId),
+    local data = { schema = 4, build = "heartbeat-timing-fix-v4", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
@@ -355,7 +358,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v3\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v4\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -421,10 +424,6 @@ connect(UserInputService.InputChanged, function(input)
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
--- Restore on the next physics step; immediate same-frame return may never replicate.
-connect(RunService.Heartbeat, function()
-    if pendingMove then restoreMove("next_physics_step") end
-end)
 connect(player.CharacterRemoving, function() restoreMove("character_removing") end)
 connect(boundary.Event, function(payload)
     if closed or not running then return end
@@ -451,6 +450,7 @@ connect(boundary.Event, function(payload)
         return
     end
     pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
+        attemptAt = os.clock(), heartbeat = heartbeatIndex,
         cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
     local target = ball.Position
     attemptCount = attemptCount + 1
@@ -468,7 +468,11 @@ connect(Workspace.DescendantAdded, function(item)
     if item.Name == "Football" then registerBall(item)
     elseif item.Name == "CatchBox" then registerBox(item) end
 end)
+-- One callback owns both return and detection: restoration always precedes any
+-- new attempt in this dispatch, regardless of signal listener execution order.
 connect(RunService.Heartbeat, function()
+    heartbeatIndex = heartbeatIndex + 1
+    if pendingMove then restoreMove("following_heartbeat") end
     local now = os.clock()
     if now - lastDiscovery >= 1 then lastDiscovery = now; discover() end
     local character = player.Character
