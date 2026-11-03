@@ -250,7 +250,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v7", 12, 4, 120, 26)
+local title = label("UF · CATCH v8", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -363,7 +363,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 7, build = "screen-tap-at-contact-v7", placeId = tostring(game.PlaceId),
+    local data = { schema = 8, build = "engine-touch-input-v8", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -376,7 +376,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v7\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v8\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -390,7 +390,7 @@ button("…", 146, 4, 24, 24, function()
     if report.Visible then report.Visible = false else showResult(buildResult()) end
 end)
 local copyButton
-copyButton = button("Copy Result", 12, 110, 186, 24, function()
+copyButton = button("Copy Result", 12, 110, 130, 24, function()
     local text = buildResult()
     -- Clipboard APIs are optional; never require them to start the tracker.
     local clipboardError
@@ -410,6 +410,7 @@ copyButton = button("Copy Result", 12, 110, 186, 24, function()
     copyButton.Text = "Select text below to copy"
 end)
 copyButton.Name = "CopyResult"
+button("Tap", 150, 110, 48, 24, function() requestCatchTap(nil, "manual_input_test") end)
 local function cleanup()
     if closed then return end
     closed = true
@@ -455,10 +456,14 @@ connect(UserInputService.TouchTap, function(positions, processed)
     end
 end)
 requestCatchTap = function(saved, source)
-    if closed or not running or saved ~= pendingMove or saved.tapAttempted then return end
-    local record = records[saved.ball]
-    if not record or record.associated or saved.humanoid.Health <= 0 then return end
-    saved.tapAttempted = true -- Exactly one input attempt per movement attempt.
+    if closed then return end
+    local record
+    if source ~= "manual_input_test" then
+        if not running or not saved or saved ~= pendingMove or saved.tapAttempted then return end
+        record = records[saved.ball]
+        if not record or record.associated or saved.humanoid.Health <= 0 then return end
+        saved.tapAttempted = true -- Exactly one input attempt per movement attempt.
+    end
     local viewport = gui.AbsoluteSize
     local point = lastRealTap
     if not point or point.X < 0 or point.Y < 0 or point.X >= viewport.X or point.Y >= viewport.Y
@@ -471,24 +476,26 @@ requestCatchTap = function(saved, source)
     end
     local errors, dispatched, method = {}, false, "none"
     if point then
-        -- Optional executor API: dispatch the mobile TouchTap signal with its real signature.
-        if type(firesignal) == "function" then
-            local ok, result = pcall(firesignal, UserInputService.TouchTap, { point }, false)
-            if ok and result ~= false then dispatched, method = true, "TouchTap_firesignal"
-            else table.insert(errors, tostring(result)) end
-        end
-        if not dispatched then
-            -- Desktop-style screen click fallback. This may be blocked or ignored on mobile.
-            local ok, service = pcall(function() return game:GetService("VirtualInputManager") end)
-            if ok and service then
-                local down, downError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0) end)
-                local up, upError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end)
-                if not up then pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end) end
-                dispatched, method = down and up, "VirtualInputManager_mouse"
-                if not down then table.insert(errors, tostring(downError)) end
-                if not up then table.insert(errors, tostring(upError)) end
-            else table.insert(errors, tostring(service)) end
-        end
+        local ok, service = pcall(function() return game:GetService("VirtualInputManager") end)
+        if ok and service then
+            -- Engine touch start/end, as used by Roblox's input testing library.
+            -- These internal APIs may be unavailable at the executor's permission level.
+            local touchId = 123456 + heartbeatIndex
+            local down, downError = pcall(function() service:SendTouchEvent(touchId, 0, point.X, point.Y) end)
+            local up, upError = pcall(function() service:SendTouchEvent(touchId, 2, point.X, point.Y) end)
+            if not up then pcall(function() service:SendTouchEvent(touchId, 2, point.X, point.Y) end) end
+            dispatched, method = down and up, "VirtualInputManager_touch"
+            if not down then table.insert(errors, tostring(downError)) end
+            if not up then table.insert(errors, tostring(upError)) end
+            if not dispatched then
+                local mouseDown, mouseDownError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0) end)
+                local mouseUp, mouseUpError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end)
+                if not mouseUp then pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end) end
+                dispatched, method = mouseDown and mouseUp, "VirtualInputManager_mouse"
+                if not mouseDown then table.insert(errors, tostring(mouseDownError)) end
+                if not mouseUp then table.insert(errors, tostring(mouseUpError)) end
+            end
+        else table.insert(errors, tostring(service)) end
     else table.insert(errors, "No tap point outside tracker UI") end
     lastInputResult = dispatched and ("dispatched_" .. method) or "unsupported_or_blocked"
     emit("catch_input", record, { source = source, method = method, dispatched = dispatched,
