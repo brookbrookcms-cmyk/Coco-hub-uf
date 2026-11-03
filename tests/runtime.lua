@@ -172,8 +172,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v5',1,true), 'clipboard success failed')
-assert(lastReport.schema==5 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v6',1,true), 'clipboard success failed')
+assert(lastReport.schema==6 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -244,5 +244,47 @@ assert(root.Position.X>0,'new attempt should advance before ball destruction')
 ball:Destroy()
 step()
 assert(root.Position.X==0,'ball destruction during approach did not restore')
+-- Local association ends movement without snapping back, including subsequent OFF.
+local currentGui=playerGui:FindFirstChild('UFTracker')
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); step()
+local beforeAssociation=root.Position.X
+assert(beforeAssociation>0,'local-association setup did not move')
+ball.Parent=character; ball.AncestryChanged:Fire()
+step()
+assert(root.Position.X==beforeAssociation,'local association incorrectly snapped back')
+findButton(currentGui,'Copy Result').Activated:Fire()
+local kept
+for _,event in ipairs(lastReport.events) do
+    if event.kind=='catch_attempt_finished' then kept=event.data end
+end
+assert(kept and kept.positionKept and not kept.restored and kept.associatedPlayer==player.Name,
+    'local association report missing')
+findButton(currentGui,'ON').Activated:Fire()
+assert(root.Position.X==beforeAssociation,'OFF undid completed local association')
+-- Another player association still ends the attempt and returns the local player.
+ball:Destroy(); root.CFrame=CFrame.new(v(0,0,0))
+findButton(currentGui,'OFF').Activated:Fire()
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); step()
+child(services.Players,'Other','Player')
+local other=child(services.Workspace,'Other','Model')
+ball.Parent=other; ball.AncestryChanged:Fire()
+step()
+assert(root.Position.X==0,'other-player association failed to return')
+ball:Destroy()
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); step()
+local beforeDisable=root.Position.X
+ball.Parent=character -- Deliberately disable before the ancestry callback is delivered.
+findButton(currentGui,'ON').Activated:Fire()
+assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
+
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, toggle and cleanup')
