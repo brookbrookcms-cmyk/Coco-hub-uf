@@ -19,6 +19,8 @@ local running, closed, visible = true, false, true
 local records, boxes, connections, events = {}, {}, {}, {}
 local nextId, eventCount, lastSample, lastDiscovery, lastUi = 0, 0, 0, 0, 0
 local started = os.clock()
+local runtimeError, errorAt, attemptCount = nil, 0, 0
+local status
 local boundary = Instance.new("BindableEvent")
 boundary.Name = "BoundaryCrossed"
 local gui = Instance.new("ScreenGui")
@@ -28,7 +30,17 @@ boundary.Parent = gui
 local shutdown = Instance.new("BindableEvent")
 shutdown.Name, shutdown.Parent = "Shutdown", gui
 local function connect(signal, fn, bucket)
-    local connection = signal:Connect(fn)
+    local connection = signal:Connect(function(...)
+        local ok, err = pcall(fn, ...)
+        if not ok then
+            runtimeError = tostring(err)
+            if status then status.Text = "ERROR · " .. runtimeError end
+            if os.clock() - errorAt > 2 then
+                errorAt = os.clock()
+                warn("UF Tracker: " .. runtimeError)
+            end
+        end
+    end)
     table.insert(bucket or connections, connection)
     return connection
 end
@@ -187,6 +199,12 @@ local function segmentDistance(a, b)
     local t = d:Dot(d) > 0 and math.clamp(-a:Dot(d) / d:Dot(d), 0, 1) or 0
     return (a + d * t).Magnitude
 end
+-- Current overlap also counts: discovery can happen after a fast ball entered the orb.
+local function entersOrb(previousRelative, relative, radius, validSegment)
+    if relative.Magnitude <= radius then return true end
+    return validSegment and previousRelative ~= nil and previousRelative.Magnitude > radius
+        and segmentDistance(previousRelative, relative) <= radius or false
+end
 local orb = Instance.new("SphereHandleAdornment")
 orb.Name, orb.Color3, orb.Transparency = "UFDetectionOrb", Color3.fromRGB(175, 70, 255), 0.85
 orb.AlwaysOnTop, orb.ZIndex, orb.Parent = false, 0, gui
@@ -204,7 +222,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · AUTO CATCH", 12, 4, 120, 26)
+local title = label("UF · CATCH v2", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -272,7 +290,7 @@ connect(UserInputService.InputChanged, function(input)
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == sliderInput then sliderInput = nil end end)
-local status = label("Waiting for football", 12, 88, 186, 18)
+status = label("Waiting for football", 12, 88, 186, 18)
 status.TextSize = 10
 local report = Instance.new("TextBox")
 report.Size, report.Position = UDim2.fromOffset(210, 130), UDim2.fromOffset(0, 118)
@@ -281,7 +299,7 @@ report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
 button("…", 146, 4, 24, 24, function()
     report.Text = HttpService:JSONEncode({ version = 1, config = config, totalEvents = eventCount,
-        retainedEvents = #events, outcomes = "Unconfirmed client observations", events = events })
+        retainedEvents = #events, outcomes = "Unconfirmed client observations", error = runtimeError, attempts = attemptCount, events = events })
     report.Visible = not report.Visible
     if report.Visible then report:CaptureFocus() end
 end)
@@ -338,6 +356,7 @@ connect(boundary.Event, function(payload)
     pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
         cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
     local target = ball.Position
+    attemptCount = attemptCount + 1
     local ok, err = pcall(function()
         root.CFrame = CFrame.new(target) * root.CFrame.Rotation
         root.AssemblyLinearVelocity = Vector3.zero
@@ -376,10 +395,9 @@ connect(RunService.Heartbeat, function()
             end
             local rootJump = dt and record.rootPosition and (root.Position - record.rootPosition).Magnitude / dt > config.jumpSpeed
             local eligible = not ball.Anchored and velocity.Magnitude > 5
-            if not record.triggered and record.relative and record.relative.Magnitude > config.radius
-                and dt and dt <= 0.25 and record.rootRef == root
-                and not jump and not rootJump and eligible
-                and segmentDistance(record.relative, relative) <= config.radius then
+            local validSegment = dt ~= nil and dt <= 0.25 and record.rootRef == root
+            if not record.triggered and not jump and not rootJump and eligible
+                and entersOrb(record.relative, relative, config.radius, validSegment) then
                 record.triggered, record.state = true, "APPROACHING"
                 local payload = { instance = ball, id = record.id, position = position, velocity = velocity,
                     distance = distance, timestamp = now - started }
@@ -392,9 +410,9 @@ connect(RunService.Heartbeat, function()
     end
     if now - lastUi >= 0.2 then
         lastUi = now
-        status.Text = not running and "OFF · orb disabled" or (nearestRecord
-            and string.format("%s · %.1f studs", nearestRecord.id, nearestDistance)
-            or (fieldContainer() and "Waiting for football" or "Waiting for UF match"))
+        status.Text = runtimeError and ("ERROR · " .. runtimeError) or (not running and "OFF · orb disabled" or (nearestRecord
+            and string.format("%s %.0fs · tries %d", nearestRecord.id, nearestDistance, attemptCount)
+            or (fieldContainer() and ("No ball · tries " .. attemptCount) or "UF match path not found")))
     end
 end)
 discover()
