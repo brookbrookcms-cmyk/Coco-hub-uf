@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v11 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v12 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Tap sends a standalone input test without moving the character; it also works with tracking OFF.
@@ -124,7 +124,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v11`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v12`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -271,3 +271,20 @@ For a clean input test, minimize executor windows and close game menus, switch t
 OFF, press Tap once, wait a second, then Copy Result. Tests cover choosing an alternative
 central point, ignoring stale top-screen taps, all-targets-blocked suppression, and the
 existing input/movement/copy cases. Live UF catch activation remains unverified.
+
+## v12 resilient report export
+
+Copy Result now normalizes diagnostic data before calling JSONEncode: finite numbers,
+booleans/strings, dense arrays and string-key dictionaries are preserved; unsupported
+values, non-finite numbers, cycles and depth/size limits receive readable placeholders
+and `serializationWarnings`. This does not identify the original v11 offending value
+without its error trace; it prevents that value from disabling the report.
+
+If JSON encoding fails, the same sanitized data is exported as a bounded path/value
+plain-text report with `FORMAT: plain-text fallback` and the encoding error. Clipboard
+copy and selectable-text fallback both accept this result. Collection failures also
+produce a smaller report containing the collection error, events and callback errors.
+
+Tests force JSONEncode to throw, insert non-finite position values, and exercise mixed
+keys, cycles and unsupported values, then check readable export. Catch behavior is
+unchanged from v11 and remains unverified.
