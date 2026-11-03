@@ -126,6 +126,7 @@ services.RunService._signals.Heartbeat=signal(TEST_HEARTBEAT_REVERSE ~= false)
 local player=child(services.Players,'Tester','Player')
 services.Players.LocalPlayer=player
 local playerGui=child(player,'PlayerGui','PlayerGui')
+function playerGui:GetGuiObjectsAtPosition() return {} end
 local character=child(services.Workspace,'Tester','Model'); player.Character=character
 local root=child(character,'HumanoidRootPart','Part')
 local humanoid=child(character,'Humanoid','Humanoid'); humanoid.Health=100; humanoid.Sit=false
@@ -176,8 +177,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v10',1,true), 'clipboard success failed')
-assert(lastReport.schema==10 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v11',1,true), 'clipboard success failed')
+assert(lastReport.schema==11 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -379,5 +380,32 @@ ball.Parent=character -- Deliberately disable before the ancestry callback is de
 findButton(currentGui,'ON').Activated:Fire()
 assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
 
+-- A processed UI target is skipped, and recorded top-screen taps are never replayed.
+local blocker=child(playerGui,'BlockingControl','TextButton'); blocker.Visible=true; blocker.Active=true
+function playerGui:GetGuiObjectsAtPosition(x,y)
+    return x==400 and {blocker} or {}
+end
+local targetEvents={}
+services.VirtualInputManager=new('VirtualInputManager')
+function services.VirtualInputManager:SendTouchEvent(id,state,x,y)
+    targetEvents[#targetEvents+1]={state=state,x=x,y=y}
+end
+for i=1,10 do step() end
+services.UserInputService.TouchTap:Fire({Vector2.new(568.5,47)},false)
+findButton(currentGui,'Tap').Activated:Fire()
+assert(#targetEvents==1 and targetEvents[1].x==480 and targetEvents[1].y>200,
+    'active UI not avoided or stale top-screen point reused')
+step(); step()
+findButton(currentGui,'Copy Result').Activated:Fire()
+local checkedInput
+for _,event in ipairs(lastReport.events) do if event.kind=='catch_input' then checkedInput=event.data end end
+assert(#checkedInput.targetChecks==2 and #checkedInput.targetChecks[1].blockers==1,
+    'hit-test evidence missing')
+function playerGui:GetGuiObjectsAtPosition() return {blocker} end
+local oldCount=#targetEvents
+findButton(currentGui,'Tap').Activated:Fire()
+assert(#targetEvents==oldCount,'blocked overlay should prevent input dispatch')
+findButton(currentGui,'Copy Result').Activated:Fire()
+assert(lastReport.input.lastResult=='unsupported_or_blocked','all-blocked input not reported')
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/unsupported input, toggle and cleanup')
