@@ -15,7 +15,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 112 pixels.
 
-- Drag the UF · AUTO CATCH title to move the panel with mouse or touch.
+- Drag the UF · CATCH v2 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - The … button opens selectable diagnostic JSON below the panel.
@@ -49,7 +49,7 @@ detects crossings between samples, including outside-to-outside crossings. It tr
 once per Instance, not once per acceleration. This deliberately merges distinct throws
 if the game reuses one Instance; the report does not establish a reliable throw separator.
 
-A first sample already inside does not trigger: the ball must first be observed outside.
+A moving eligible ball first sampled inside triggers once; valid outside-to-outside segments also trigger.
 Radius changes, switching off/on and respawn reset the crossing baseline without rearming
 an already-triggered ball. Anchored balls and balls moving at 5 studs/s or less do not
 trigger. Ball/player position-derived speed above 250 studs/s or sample gaps over 0.25 s
@@ -100,3 +100,11 @@ Live checklist:
    Check original position/orientation/velocity restoration, OFF/close cancellation,
    respawn, death, seated state and overlapping balls. Confirm catch outcome manually;
    neither a successful local move nor player association proves a catch.
+
+## v2 troubleshooting
+
+The status line shows the nearest ball ID/distance and `tries` (local movement attempt
+count). `UF match path not found` means the observed hierarchy is absent in this mode;
+`No ball` means no eligible ball is currently tracked. Runtime callback errors appear
+in the status and diagnostic report, with throttled console warnings. These observations
+can identify discovery, trigger or local movement failures; a try does not prove a catch.
