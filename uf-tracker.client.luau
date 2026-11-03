@@ -265,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v13", 12, 4, 120, 26)
+local title = label("UF · CATCH v14", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -336,7 +336,9 @@ connect(UserInputService.InputEnded, function(input) if input == sliderInput the
 status = label("Waiting for football", 12, 88, 186, 18)
 status.TextSize = 10
 local report = Instance.new("TextBox")
-report.Name = "ResultText"
+report.Name, report.Text = "ResultText", ""
+report.PlaceholderText = "Press TEST + COPY to generate a report"
+report.TextXAlignment, report.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
 report.Size, report.Position = UDim2.fromOffset(210, 150), UDim2.fromOffset(0, 148)
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
@@ -401,8 +403,8 @@ local function encodeResult(data)
     local clean = jsonSafe(data, {}, 0, warnings, "result", { remaining = 20000 })
     clean.serializationWarnings = warnings
     local ok, encoded = pcall(function() return HttpService:JSONEncode(clean) end)
-    if ok and type(encoded) == "string" then return "UF COPY RESULT v13\n" .. encoded end
-    return "UF COPY RESULT v13\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
+    if ok and type(encoded) == "string" then return "UF COPY RESULT v14\n" .. encoded end
+    return "UF COPY RESULT v14\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
         .. "\n" .. plainReport(clean)
 end
 local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
@@ -447,7 +449,7 @@ local function collectResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 13, build = "single-test-copy-v13", placeId = tostring(game.PlaceId),
+    local data = { schema = 14, build = "explicit-result-output-v14", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -469,10 +471,10 @@ local function buildResult()
     reportSerial = reportSerial + 1
     local ok, data = pcall(collectResult)
     if not ok then
-        data = { schema = 13, build = "single-test-copy-v13", collectionError = tostring(data),
+        data = { schema = 14, build = "explicit-result-output-v14", collectionError = tostring(data),
             lastError = runtimeError, events = events, callbackErrors = callbackErrors, attempts = attemptCount }
     end
-    data.reportId = string.format("v13-%d-%.3f", reportSerial, os.clock() - started)
+    data.reportId = string.format("v14-%d-%.3f", reportSerial, os.clock() - started)
     data.manualTestCount = manualTestCount
     return encodeResult(data)
 end
@@ -490,7 +492,11 @@ button("…", 146, 4, 24, 24, function()
 end)
 local copyButton, testCopyButton
 publishResult = function()
-    local text = buildResult()
+    local ok, text = pcall(buildResult)
+    if not ok then
+        text = "UF COPY RESULT v14\nREPORT ERROR: " .. tostring(text)
+            .. "\nLast callback error: " .. tostring(runtimeError)
+    end
     -- The displayed text is authoritative even if the executor clipboard stays stale.
     showResult(text, false)
     local clipboardError
@@ -515,12 +521,27 @@ copyButton.Name, copyButton.TextSize, copyButton.TextScaled = "CopyResult", 10, 
 -- One activation runs the input test and exports after its release/animation probe.
 testCopyButton = button("TEST + COPY", 12, 110, 130, 24, function()
     manualTestCount = manualTestCount + 1
-    testCopyButton.Text = "Testing #" .. manualTestCount .. "…"
-    report.Visible = false
+    local test = manualTestCount
+    testCopyButton.Text = "Testing #" .. test .. "…"
+    showResult("Running input test #" .. test .. "…\nPreparing report; wait one second.", false)
     pcall(function() report:ReleaseFocus() end)
-    emit("ui_test_requested", nil, { test = manualTestCount })
-    requestCatchTap(nil, "manual_input_test")
-    scheduledReport = os.clock() + 0.5
+    emit("ui_test_requested", nil, { test = test })
+    -- Schedule before attempting input, independently of the tracking heartbeat.
+    scheduledReport = test
+    task.delay(0.5, function()
+        if closed or scheduledReport ~= test then return end
+        scheduledReport = nil
+        local ok, err = pcall(publishResult)
+        if not ok then
+            showResult("UF COPY RESULT v14\nREPORT ERROR: " .. tostring(err), false)
+            testCopyButton.Text = "Error shown below"
+        end
+    end)
+    local ok, err = pcall(requestCatchTap, nil, "manual_input_test")
+    if not ok then
+        runtimeError = tostring(err)
+        emit("manual_input_test_error", nil, { error = runtimeError })
+    end
 end)
 testCopyButton.Name = "TestAndCopy"
 local function cleanup()
@@ -781,10 +802,6 @@ connect(RunService.Heartbeat, function()
         end
     end
     updatePendingMove(now)
-    if scheduledReport and now >= scheduledReport then
-        scheduledReport = nil
-        publishResult()
-    end
     if now - lastDiscovery >= 1 then lastDiscovery = now; discover() end
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
