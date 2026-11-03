@@ -6,8 +6,9 @@ When an eligible football crosses the enabled orb, it attempts a client-side app
 toward the live ball over 0.10 seconds, follows it for 0.20 seconds, then restores the
 saved position, rotation and velocities. It aligns the locally discovered CatchBox center
 with the ball using its starting offset from the root; if none is found it uses the root.
-These durations are config settings, not verified UF catch windows. There is no verified
-automatic catch-input binding: this version controls movement only. It makes no remote
+These durations are config settings, not verified UF catch windows. On first local CatchBox contact (or arrival if no contact callback is received), it
+attempts one screen tap through optional executor input APIs. Whether UF accepts that
+simulated input remains unverified. It makes no remote
 calls and cannot confirm server catch validation. Movement may be visible, rejected or
 corrected; this is not guaranteed catching.
 
@@ -19,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v6 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v7 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
@@ -122,7 +123,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v6`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v7`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -177,3 +178,20 @@ it did not establish a local catch followed by a script-induced drop.
 
 Regression checks cover local-association position preservation, OFF after completion,
 and normal restoration on other-player association.
+
+## v7 screen-tap attempt
+
+Based on the user's confirmed normal catch control (tapping the screen), v7 attempts
+one tap at first local CatchBox contact, with arrival as a fallback. It uses optional
+`firesignal(UserInputService.TouchTap, {position}, false)` when supported. If unavailable
+or blocked, it tries a paired mouse down/up via VirtualInputManager. A mouse event may
+not activate mobile touch-only catch handlers. Neither API is guaranteed in Delta or
+other executors. A dispatched event is not proof that UF ran catch logic or accepted a catch.
+
+The most recent unprocessed real TouchTap outside the UI is used when available;
+otherwise a point outside the tracker panel is selected. No tap occurs for unrelated
+players, disabled tracking, or repeated contact in the same attempt. No remotes are
+invented or invoked. Copy Result includes `input` capabilities/results and `catch_input`
+events with source, method, dispatch status and errors. These distinguish movement from
+input support. Tests cover contact dispatch, arrival deduplication, unavailable input,
+and mouse down/up fallback; real UF activation still requires live validation.
