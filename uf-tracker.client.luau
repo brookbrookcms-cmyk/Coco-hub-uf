@@ -265,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v14", 12, 4, 120, 26)
+local title = label("UF · CATCH v15", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -339,7 +339,7 @@ local report = Instance.new("TextBox")
 report.Name, report.Text = "ResultText", ""
 report.PlaceholderText = "Press TEST + COPY to generate a report"
 report.TextXAlignment, report.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
-report.Size, report.Position = UDim2.fromOffset(210, 150), UDim2.fromOffset(0, 148)
+report.Size, report.Position = UDim2.fromOffset(210, 130), UDim2.fromOffset(0, 168)
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
@@ -403,8 +403,8 @@ local function encodeResult(data)
     local clean = jsonSafe(data, {}, 0, warnings, "result", { remaining = 20000 })
     clean.serializationWarnings = warnings
     local ok, encoded = pcall(function() return HttpService:JSONEncode(clean) end)
-    if ok and type(encoded) == "string" then return "UF COPY RESULT v14\n" .. encoded end
-    return "UF COPY RESULT v14\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
+    if ok and type(encoded) == "string" then return "UF COPY RESULT v15\n" .. encoded end
+    return "UF COPY RESULT v15\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
         .. "\n" .. plainReport(clean)
 end
 local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
@@ -449,7 +449,7 @@ local function collectResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 14, build = "explicit-result-output-v14", placeId = tostring(game.PlaceId),
+    local data = { schema = 15, build = "paged-report-snapshot-v15", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -471,30 +471,66 @@ local function buildResult()
     reportSerial = reportSerial + 1
     local ok, data = pcall(collectResult)
     if not ok then
-        data = { schema = 14, build = "explicit-result-output-v14", collectionError = tostring(data),
+        data = { schema = 15, build = "paged-report-snapshot-v15", collectionError = tostring(data),
             lastError = runtimeError, events = events, callbackErrors = callbackErrors, attempts = attemptCount }
     end
-    data.reportId = string.format("v14-%d-%.3f", reportSerial, os.clock() - started)
+    data.reportId = string.format("v15-%d-%.3f", reportSerial, os.clock() - started)
     data.manualTestCount = manualTestCount
     return encodeResult(data)
 end
+local latestReportText, reportPage, reportPageCount = "", 1, 1
+local reportCaption = label("No report yet", 0, 148, 210, 18)
+reportCaption.Visible, reportCaption.TextSize = false, 10
+local previousPage, nextPage, refreshReport
+local function renderReportPage()
+    local pageSize = 1600
+    reportPageCount = math.max(1, math.ceil(#latestReportText / pageSize))
+    reportPage = math.clamp(reportPage, 1, reportPageCount)
+    local first = (reportPage - 1) * pageSize + 1
+    local last = math.min(#latestReportText, reportPage * pageSize)
+    -- UTF-8 boundaries may overlap by a few bytes across pages; never display broken characters.
+    if utf8 and utf8.offset and #latestReportText > 0 then
+        local ok, boundary = pcall(utf8.offset, latestReportText, 0, first)
+        if ok and boundary then first = boundary end
+        if last < #latestReportText then
+            ok, boundary = pcall(utf8.offset, latestReportText, 0, last + 1)
+            if ok and boundary then last = boundary - 1 end
+        end
+    end
+    report.Text = latestReportText:sub(first, last)
+    reportCaption.Text = "Snapshot #" .. reportSerial .. " · page " .. reportPage .. "/" .. reportPageCount
+    if previousPage then previousPage.Visible = report.Visible and reportPageCount > 1 end
+    if nextPage then nextPage.Visible = report.Visible and reportPageCount > 1 end
+end
 local function showResult(text, focus)
-    report.Text, report.Visible = text, true
+    latestReportText, reportPage = text, 1
+    report.Visible, reportCaption.Visible = true, true
+    if refreshReport then refreshReport.Visible = true end
+    renderReportPage()
     if focus == false then return end
     report:CaptureFocus()
     pcall(function()
-        report.CursorPosition = #text + 1
+        report.CursorPosition = #report.Text + 1
         report.SelectionStart = 1
     end)
 end
+previousPage = button("‹", 0, 304, 36, 24, function() reportPage = reportPage - 1; renderReportPage() end)
+nextPage = button("›", 42, 304, 36, 24, function() reportPage = reportPage + 1; renderReportPage() end)
+refreshReport = button("Refresh", 86, 304, 124, 24, function() publishResult() end)
+previousPage.Name, nextPage.Name, refreshReport.Name = "PreviousReportPage", "NextReportPage", "RefreshReport"
+previousPage.Visible, nextPage.Visible, refreshReport.Visible = false, false, false
+
 button("…", 146, 4, 24, 24, function()
-    if report.Visible then report.Visible = false else showResult(buildResult()) end
+    if report.Visible then
+        report.Visible, reportCaption.Visible = false, false
+        previousPage.Visible, nextPage.Visible, refreshReport.Visible = false, false, false
+    else showResult(buildResult(), false) end
 end)
 local copyButton, testCopyButton
 publishResult = function()
     local ok, text = pcall(buildResult)
     if not ok then
-        text = "UF COPY RESULT v14\nREPORT ERROR: " .. tostring(text)
+        text = "UF COPY RESULT v15\nREPORT ERROR: " .. tostring(text)
             .. "\nLast callback error: " .. tostring(runtimeError)
     end
     -- The displayed text is authoritative even if the executor clipboard stays stale.
@@ -524,6 +560,7 @@ testCopyButton = button("TEST + COPY", 12, 110, 130, 24, function()
     local test = manualTestCount
     testCopyButton.Text = "Testing #" .. test .. "…"
     showResult("Running input test #" .. test .. "…\nPreparing report; wait one second.", false)
+    reportCaption.Text = "Testing #" .. test .. " · report pending"
     pcall(function() report:ReleaseFocus() end)
     emit("ui_test_requested", nil, { test = test })
     -- Schedule before attempting input, independently of the tracking heartbeat.
@@ -533,7 +570,7 @@ testCopyButton = button("TEST + COPY", 12, 110, 130, 24, function()
         scheduledReport = nil
         local ok, err = pcall(publishResult)
         if not ok then
-            showResult("UF COPY RESULT v14\nREPORT ERROR: " .. tostring(err), false)
+            showResult("UF COPY RESULT v15\nREPORT ERROR: " .. tostring(err), false)
             testCopyButton.Text = "Error shown below"
         end
     end)
@@ -581,7 +618,7 @@ end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
 local function tapHitsPanel(point)
     local position = frame.AbsolutePosition
-    local height = report.Visible and 298 or 142
+    local height = report.Visible and 332 or 142
     return point.X >= position.X and point.X <= position.X + 210
         and point.Y >= position.Y and point.Y <= position.Y + height
 end
