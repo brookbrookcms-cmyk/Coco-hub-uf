@@ -3,8 +3,8 @@
 `uf-tracker.client.luau` is a standalone client-side Luau script. It observes the
 verified UF match hierarchy and provides an adjustable spherical orb and diagnostics.
 When an eligible football crosses the enabled orb, it attempts a client-side move to
-the ball, then restores the saved position, rotation and velocities on the next physics
-step. It makes no remote calls and cannot confirm server catch validation. Movement
+the ball, then restores the saved position, rotation and velocities on the following Heartbeat
+dispatch. It makes no remote calls and cannot confirm server catch validation. Movement
 may be visible, rejected or corrected; this is not guaranteed catching.
 
 Run the complete file in a Roblox client environment. It uses standard Roblox APIs,
@@ -15,7 +15,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v3 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v4 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
@@ -118,7 +118,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v3`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v4`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -134,3 +134,14 @@ etc.). No report field asserts that the server accepted a catch.
 Local mock checks also cover clipboard success, missing clipboard, throwing clipboard,
 alternate clipboard fallback, selectable text and live diagnostic fields. Actual Delta
 clipboard support and UF behavior still require the report from a real session.
+
+## v4 timing correction
+
+A live report showed successful local CFrame assignments followed by restoration only
+0.05–0.38 ms later. Separate Heartbeat listeners could move and restore within the same
+dispatch. Detection and restoration now share one callback: it restores previous moves
+at the beginning, before any new detection can run. Returns therefore occur on a later
+Heartbeat, independent of listener ordering. Return events include `heldSeconds` and
+`heartbeatDelta` to verify timing on the actual client. The regression test reproduced
+the old failure with reversed listeners and passes with both listener orders after the fix.
+This fixes the observed scheduling bug; it does not establish server-accepted catches.
