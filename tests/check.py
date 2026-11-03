@@ -85,8 +85,9 @@ assert(root.CFrame == 99 and not observed[3].restored, 'dead character guard')
     check(lib.luaL_loadstring(state, (harness + 'local function segmentDistance(a, b)' + helper + cases + restore_setup + 'local pendingMove' + restoration + restore_cases).encode()))
     check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
     print('PASS: syntax, geometry, inside-first detection and restoration/cancellation guards; Roblox APIs not executed')
-    runtime = "TEST_SCRIPT_PATH = " + repr(str(root / 'uf-tracker.client.luau')) + "\n" + (root / 'tests/runtime.lua').read_text()
-    check(lib.luaL_loadstring(state, runtime.encode()))
-    check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
+    for reverse in ('true', 'false'):
+        runtime = "TEST_HEARTBEAT_REVERSE = " + reverse + "\nTEST_SCRIPT_PATH = " + repr(str(root / 'uf-tracker.client.luau')) + "\n" + (root / 'tests/runtime.lua').read_text()
+        check(lib.luaL_loadstring(state, runtime.encode()))
+        check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
 finally:
     lib.lua_close(state)
