@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v10 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v11 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Tap sends a standalone input test without moving the character; it also works with tracking OFF.
@@ -124,7 +124,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v10`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v11`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -250,3 +250,24 @@ remotes and successful input calls remain distinct from catch activation/possess
 Tests cover delayed release duration, observed input events, animation probe data,
 overlap suppression, OFF cancellation, and mouse fallback as well as the earlier
 movement, clipboard and association cases. None of these mocks validate UF handlers.
+
+## v11 clear input targets
+
+The v10 report confirmed a 64–71 ms held input reaching InputBegan/InputEnded with
+`processed=true`, while the only animation remained the same idle track. Its replay
+target was near the top of the screen. This suggests UI consumption; it does not prove
+which handler rejected or consumed the catch input.
+
+v11 never replays recorded tap positions. It tests five central candidates against the
+tracker panel and PlayerGui:GetGuiObjectsAtPosition, plus CoreGui when accessible, and
+skips points covered by visible active controls/buttons/textboxes. If every candidate is
+blocked, it logs the obstruction instead of injecting input. Inaccessible hit tests are
+marked unavailable rather than treated as a verified UI-free result. `targetChecks` in
+catch_input events lists inspected roots, hit paths/classes and blockers. Full-screen
+game input-capture GUIs can themselves be listed as blockers, so reports need review;
+this is a diagnostic input-target change, not a proven catch implementation.
+
+For a clean input test, minimize executor windows and close game menus, switch the orb
+OFF, press Tap once, wait a second, then Copy Result. Tests cover choosing an alternative
+central point, ignoring stale top-screen taps, all-targets-blocked suppression, and the
+existing input/movement/copy cases. Live UF catch activation remains unverified.
