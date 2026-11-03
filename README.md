@@ -19,7 +19,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v5 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v6 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
@@ -122,7 +122,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v5`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v6`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -163,3 +163,17 @@ Diagnostics show approach/hold progress and `catch_movement_started`, `catch_arr
 and return timing. Tests check intermediate positions, moving-ball following, local
 CatchBox offset alignment, configured timeout, ball destruction during movement, and
 OFF/close/duplicate cancellation. Server acceptance and catch input remain unverified.
+
+## v6 local association handling
+
+If the tracked ball becomes associated with the local player's Workspace container,
+the movement attempt finishes without restoring the old position or velocities. This
+also applies when closing or disabling a pending attempt while that association exists.
+`catch_attempt_finished` reports `positionKept` and `associatedPlayer`. If another
+player is associated, the script returns normally. Cached association identity survives
+ball destruction during the attempt. Association remains observational and is not proof
+of possession. The v5 report associated both balls with another player before returning;
+it did not establish a local catch followed by a script-induced drop.
+
+Regression checks cover local-association position preservation, OFF after completion,
+and normal restoration on other-player association.
