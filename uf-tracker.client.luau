@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 local player = Players.LocalPlayer
 assert(player, "UF Tracker requires a client")
 local playerGui = player:WaitForChild("PlayerGui")
@@ -250,7 +251,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v8", 12, 4, 120, 26)
+local title = label("UF · CATCH v9", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -327,6 +328,8 @@ report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, tr
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
 local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
+local ignoreTapUntil, ignoredSyntheticTaps = 0, 0
+local lastInjectedScreenPoint
 local function buildResult()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -363,10 +366,12 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 8, build = "engine-touch-input-v8", placeId = tostring(game.PlaceId),
+    local data = { schema = 9, build = "tap-coordinate-feedback-fix-v9", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
+            ignoredSyntheticTaps = ignoredSyntheticTaps,
+            lastInjectedScreenPoint = lastInjectedScreenPoint and { x = lastInjectedScreenPoint.X, y = lastInjectedScreenPoint.Y },
             firesignalAvailable = type(firesignal) == "function" },
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
         retainedEvents = #events, fieldPath = pathNodes, fieldChildren = fieldChildren,
@@ -376,7 +381,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v8\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v9\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -451,6 +456,10 @@ local function tapHitsPanel(point)
         and point.Y >= position.Y and point.Y <= position.Y + height
 end
 connect(UserInputService.TouchTap, function(positions, processed)
+    if os.clock() <= ignoreTapUntil then
+        ignoredSyntheticTaps = ignoredSyntheticTaps + 1
+        return
+    end
     if not processed and not pendingMove and positions[1] and not tapHitsPanel(positions[1]) then
         lastRealTap, realTapCount = positions[1], realTapCount + 1
     end
@@ -475,22 +484,29 @@ requestCatchTap = function(saved, source)
         end
     end
     local errors, dispatched, method = {}, false, "none"
+    local insetOk, inset = pcall(function() return GuiService:GetGuiInset() end)
+    if not insetOk then inset = Vector2.new(0, 0); table.insert(errors, "GUI inset unavailable") end
+    -- Recorded TouchTap positions and GUI coordinates exclude the top inset on the
+    -- reported client. Engine input consumes screen coordinates: convert once only.
+    local screenPoint = point and Vector2.new(point.X + inset.X, point.Y + inset.Y)
     if point then
+        ignoreTapUntil = os.clock() + 0.35
+        lastInjectedScreenPoint = screenPoint
         local ok, service = pcall(function() return game:GetService("VirtualInputManager") end)
         if ok and service then
             -- Engine touch start/end, as used by Roblox's input testing library.
             -- These internal APIs may be unavailable at the executor's permission level.
             local touchId = 123456 + heartbeatIndex
-            local down, downError = pcall(function() service:SendTouchEvent(touchId, 0, point.X, point.Y) end)
-            local up, upError = pcall(function() service:SendTouchEvent(touchId, 2, point.X, point.Y) end)
-            if not up then pcall(function() service:SendTouchEvent(touchId, 2, point.X, point.Y) end) end
+            local down, downError = pcall(function() service:SendTouchEvent(touchId, 0, screenPoint.X, screenPoint.Y) end)
+            local up, upError = pcall(function() service:SendTouchEvent(touchId, 2, screenPoint.X, screenPoint.Y) end)
+            if not up then pcall(function() service:SendTouchEvent(touchId, 2, screenPoint.X, screenPoint.Y) end) end
             dispatched, method = down and up, "VirtualInputManager_touch"
             if not down then table.insert(errors, tostring(downError)) end
             if not up then table.insert(errors, tostring(upError)) end
             if not dispatched then
-                local mouseDown, mouseDownError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0) end)
-                local mouseUp, mouseUpError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end)
-                if not mouseUp then pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end) end
+                local mouseDown, mouseDownError = pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, true, game, 0) end)
+                local mouseUp, mouseUpError = pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, false, game, 0) end)
+                if not mouseUp then pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, false, game, 0) end) end
                 dispatched, method = mouseDown and mouseUp, "VirtualInputManager_mouse"
                 if not mouseDown then table.insert(errors, tostring(mouseDownError)) end
                 if not mouseUp then table.insert(errors, tostring(mouseUpError)) end
@@ -499,7 +515,9 @@ requestCatchTap = function(saved, source)
     else table.insert(errors, "No tap point outside tracker UI") end
     lastInputResult = dispatched and ("dispatched_" .. method) or "unsupported_or_blocked"
     emit("catch_input", record, { source = source, method = method, dispatched = dispatched,
-        point = point and { x = point.X, y = point.Y }, errors = errors,
+        point = point and { x = point.X, y = point.Y },
+        screenPoint = screenPoint and { x = screenPoint.X, y = screenPoint.Y },
+        guiInset = { x = inset.X, y = inset.Y }, errors = errors,
         result = lastInputResult, outcome = "Input dispatch does not prove catch activation" })
 end
 local function updatePendingMove(now)
