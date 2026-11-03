@@ -60,6 +60,7 @@ local function emit(kind, record, data)
 end
 -- Keep a single outstanding move so off/close/respawn can safely cancel it.
 local pendingMove
+local requestCatchTap
 local function resetBoundaries()
     for _, record in pairs(records) do
         record.relative, record.rootPosition, record.rootRef = nil, nil, nil
@@ -186,6 +187,9 @@ local function registerBall(ball)
             emit("contact_observed", record, { player = owner, snapshot = snapshot(ball),
                 elapsed = os.clock() - record.discoveredAt, catchboxSize = vector(hit.Size),
                 catchboxPosition = vector(hit.Position) })
+            if owner == player.Name and pendingMove and pendingMove.ball == ball and requestCatchTap then
+                requestCatchTap(pendingMove, "local_catchbox_contact")
+            end
         end
     end, record.connections)
     record.discoveredAt = os.clock()
@@ -246,7 +250,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v6", 12, 4, 120, 26)
+local title = label("UF · CATCH v7", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -322,6 +326,7 @@ report.Size, report.Position = UDim2.fromOffset(210, 150), UDim2.fromOffset(0, 1
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
+local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
 local function buildResult()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -358,9 +363,11 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 6, build = "keep-local-association-v6", placeId = tostring(game.PlaceId),
+    local data = { schema = 7, build = "screen-tap-at-contact-v7", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
+        input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
+            firesignalAvailable = type(firesignal) == "function" },
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
         retainedEvents = #events, fieldPath = pathNodes, fieldChildren = fieldChildren,
         character = { exists = character ~= nil, rootFound = root ~= nil, humanoidFound = humanoid ~= nil,
@@ -369,7 +376,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v6\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v7\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -402,6 +409,7 @@ copyButton = button("Copy Result", 12, 110, 186, 24, function()
     showResult(text .. (clipboardError and ("\nClipboard error: " .. clipboardError) or ""))
     copyButton.Text = "Select text below to copy"
 end)
+copyButton.Name = "CopyResult"
 local function cleanup()
     if closed then return end
     closed = true
@@ -435,6 +443,58 @@ connect(UserInputService.InputChanged, function(input)
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
+local function tapHitsPanel(point)
+    local position = frame.AbsolutePosition
+    local height = report.Visible and 298 or 142
+    return point.X >= position.X and point.X <= position.X + 210
+        and point.Y >= position.Y and point.Y <= position.Y + height
+end
+connect(UserInputService.TouchTap, function(positions, processed)
+    if not processed and not pendingMove and positions[1] and not tapHitsPanel(positions[1]) then
+        lastRealTap, realTapCount = positions[1], realTapCount + 1
+    end
+end)
+requestCatchTap = function(saved, source)
+    if closed or not running or saved ~= pendingMove or saved.tapAttempted then return end
+    local record = records[saved.ball]
+    if not record or record.associated or saved.humanoid.Health <= 0 then return end
+    saved.tapAttempted = true -- Exactly one input attempt per movement attempt.
+    local viewport = gui.AbsoluteSize
+    local point = lastRealTap
+    if not point or point.X < 0 or point.Y < 0 or point.X >= viewport.X or point.Y >= viewport.Y
+        or tapHitsPanel(point) then
+        point = nil
+        for _, candidate in ipairs({ Vector2.new(viewport.X * 0.5, viewport.Y * 0.4),
+            Vector2.new(viewport.X * 0.25, viewport.Y * 0.4), Vector2.new(viewport.X * 0.75, viewport.Y * 0.4) }) do
+            if not tapHitsPanel(candidate) then point = candidate; break end
+        end
+    end
+    local errors, dispatched, method = {}, false, "none"
+    if point then
+        -- Optional executor API: dispatch the mobile TouchTap signal with its real signature.
+        if type(firesignal) == "function" then
+            local ok, result = pcall(firesignal, UserInputService.TouchTap, { point }, false)
+            if ok and result ~= false then dispatched, method = true, "TouchTap_firesignal"
+            else table.insert(errors, tostring(result)) end
+        end
+        if not dispatched then
+            -- Desktop-style screen click fallback. This may be blocked or ignored on mobile.
+            local ok, service = pcall(function() return game:GetService("VirtualInputManager") end)
+            if ok and service then
+                local down, downError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0) end)
+                local up, upError = pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end)
+                if not up then pcall(function() service:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0) end) end
+                dispatched, method = down and up, "VirtualInputManager_mouse"
+                if not down then table.insert(errors, tostring(downError)) end
+                if not up then table.insert(errors, tostring(upError)) end
+            else table.insert(errors, tostring(service)) end
+        end
+    else table.insert(errors, "No tap point outside tracker UI") end
+    lastInputResult = dispatched and ("dispatched_" .. method) or "unsupported_or_blocked"
+    emit("catch_input", record, { source = source, method = method, dispatched = dispatched,
+        point = point and { x = point.X, y = point.Y }, errors = errors,
+        result = lastInputResult, outcome = "Input dispatch does not prove catch activation" })
+end
 local function updatePendingMove(now)
     local saved = pendingMove
     if not saved then return end
@@ -473,6 +533,7 @@ local function updatePendingMove(now)
         saved.arrived = true
         emit("catch_arrived", record, { elapsed = elapsed, rootPosition = vector(saved.root.Position),
             ballPosition = vector(saved.ball.Position), catchOffset = vector(saved.catchOffset) })
+        requestCatchTap(saved, "arrival_fallback")
     end
 end
 connect(player.CharacterRemoving, function() restoreMove("character_removing") end)
@@ -516,7 +577,7 @@ connect(boundary.Event, function(payload)
     emit("catch_attempt", record, { position = vector(ball.Position), movementPending = true,
         approachSeconds = config.approachSeconds, holdSeconds = config.holdSeconds,
         catchboxPath = catchboxPath, catchOffset = vector(catchOffset),
-        catchInput = "No verified automatic catch input binding", outcome = "unconfirmed" })
+        catchInput = "Attempt screen tap at first local contact or arrival", outcome = "unconfirmed" })
 end)
 connect(Workspace.DescendantAdded, function(item)
     if item.Name == "Football" then registerBall(item)
