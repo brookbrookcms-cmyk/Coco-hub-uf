@@ -172,8 +172,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v7',1,true), 'clipboard success failed')
-assert(lastReport.schema==7 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v8',1,true), 'clipboard success failed')
+assert(lastReport.schema==8 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -201,16 +201,20 @@ assert(root.Position.X>3.9 and root.Position.X<4.1,'slower approach intermediate
 step()
 assert(root.Position.X>7.9 and root.Position.X<8.1,'approach should continue')
 local tapCount=0
-firesignal=function(sig, positions, processed)
-    assert(sig==services.UserInputService.TouchTap and positions[1] and processed==false,'wrong touch signature')
-    tapCount=tapCount+1
-    sig:Fire(positions,processed)
+services.VirtualInputManager=new('VirtualInputManager')
+function services.VirtualInputManager:SendTouchEvent(id,state,x,y)
+    assert(state==0 or state==2,'invalid touch state')
+    if state==2 then tapCount=tapCount+1 end
 end
+-- A firesignal function must never short-circuit engine input in v8.
+firesignal=function() error('obsolete firesignal must not be called') end
 ball.Touched:Fire(catchbox)
 assert(tapCount==1,'local contact did not dispatch tap')
 step()
 assert(root.Position.X==10,'approach did not arrive at ball')
 assert(tapCount==1,'arrival duplicated contact tap')
+findButton(gui,'Tap').Activated:Fire()
+assert(tapCount==2,'manual Tap test did not send engine touch')
 assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
 ball.Position=v(12,0,0)
 step()
@@ -218,6 +222,7 @@ assert(root.Position.X==12,'hold should follow current ball position')
 step(); step(); step(); step()
 assert(root.Position.X==0,'hold timeout failed to restore')
 firesignal=nil
+services.VirtualInputManager=nil
 copy.Activated:Fire()
 local returned, arrived
 for _,event in ipairs(lastReport.events) do
@@ -322,4 +327,4 @@ findButton(currentGui,'ON').Activated:Fire()
 assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, tap dedup/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, engine touch/manual test/dedup/unsupported input, toggle and cleanup')
