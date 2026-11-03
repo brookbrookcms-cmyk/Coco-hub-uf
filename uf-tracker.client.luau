@@ -1,4 +1,4 @@
--- UF tracking foundation. Observations only; no movement or remote calls.
+-- UF orb with experimental local catch attempts. No remote calls or catch guarantees.
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -41,6 +41,31 @@ local function emit(kind, record, data)
     eventCount = eventCount + 1
     table.insert(events, { t = os.clock() - started, kind = kind, id = record and record.id, data = data })
     if #events > config.maxEvents then table.remove(events, 1) end
+end
+-- Keep a single outstanding move so off/close/respawn can safely cancel it.
+local pendingMove
+local function resetBoundaries()
+    for _, record in pairs(records) do
+        record.relative, record.rootPosition, record.rootRef = nil, nil, nil
+    end
+end
+local function restoreMove(reason)
+    local saved = pendingMove
+    if not saved then return end
+    pendingMove = nil
+    local ok, err = false, nil
+    -- Never move a replacement character or restore after the original character died.
+    if player.Character == saved.character and saved.root:IsDescendantOf(saved.character)
+        and saved.humanoid.Health > 0 then
+        ok, err = pcall(function()
+            saved.root.CFrame = saved.cframe
+            saved.root.AssemblyLinearVelocity = saved.linear
+            saved.root.AssemblyAngularVelocity = saved.angular
+        end)
+    end
+    resetBoundaries()
+    emit("catch_attempt_return", nil, { id = saved.id, reason = reason, restored = ok,
+        error = err and tostring(err) })
 end
 local function snapshot(ball)
     return { name = ball.Name, path = ball:GetFullName(), position = vector(ball.Position),
@@ -179,7 +204,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · ORB", 12, 4, 120, 26)
+local title = label("UF · AUTO CATCH", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -194,6 +219,7 @@ local radiusLabel = label("Radius · 20 studs", 12, 34, 130, 24)
 local toggle
 local function setEnabled(enabled)
     running, visible = enabled, enabled
+    if not enabled then restoreMove("disabled") end
     toggle.Text = enabled and "ON" or "OFF"
     toggle.BackgroundColor3 = enabled and Color3.fromRGB(123, 56, 185) or Color3.fromRGB(65, 60, 72)
     for _, record in pairs(records) do record.relative = nil end
@@ -262,6 +288,7 @@ end)
 local function cleanup()
     if closed then return end
     closed = true
+    restoreMove("closed")
     disconnect(connections)
     for _, record in pairs(records) do disconnect(record.connections) end
     for _, entry in pairs(boxes) do disconnect(entry.connections) end
@@ -290,6 +317,37 @@ connect(UserInputService.InputChanged, function(input)
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
+-- Restore on the next physics step; immediate same-frame return may never replicate.
+connect(RunService.Heartbeat, function()
+    if pendingMove then restoreMove("next_physics_step") end
+end)
+connect(player.CharacterRemoving, function() restoreMove("character_removing") end)
+connect(boundary.Event, function(payload)
+    if closed or not running then return end
+    if pendingMove then
+        emit("catch_attempt_skipped", nil, { id = payload.id, reason = "another_attempt_active" })
+        return
+    end
+    local ball = payload.instance
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local record = records[ball]
+    if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit or not record
+        or record.associated or ball.Anchored or not ball:IsDescendantOf(Workspace) then return end
+    pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
+        cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
+    local target = ball.Position
+    local ok, err = pcall(function()
+        root.CFrame = CFrame.new(target) * root.CFrame.Rotation
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end)
+    resetBoundaries()
+    emit("catch_attempt", record, { position = vector(target), localMoveApplied = ok,
+        error = err and tostring(err), outcome = "unconfirmed" })
+    if not ok then restoreMove("movement_error") end
+end)
 connect(Workspace.DescendantAdded, function(item)
     if item.Name == "Football" then registerBall(item)
     elseif item.Name == "CatchBox" then registerBox(item) end
