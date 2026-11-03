@@ -91,6 +91,7 @@ function methods:GetPropertyChangedSignal(name)
     return self._signals['property:'..name]
 end
 function methods:CaptureFocus() end
+function methods:ReleaseFocus() end
 function methods:Fire(...) self.Event:Fire(...) end
 function methods:Destroy()
     if self._destroyed then return end
@@ -120,7 +121,7 @@ function services.HttpService:JSONEncode(data)
     serializable(data)
     lastReport = data
     if forceJsonFailure then error("Can't convert to JSON") end
-    return '{"mockJSON":true}'
+    return '{"reportId":"' .. (data.reportId or '') .. '","mockJSON":true}'
 end
 -- Roblox does not promise the ordering our original mock assumed.
 -- Reverse Heartbeat listeners to reproduce the real same-frame return bug.
@@ -153,7 +154,7 @@ local function step()
     assert(#failures==0,table.concat(failures,'\n'))
 end
 local function findButton(gui,text)
-    for _,obj in ipairs(all) do if not obj._destroyed and (obj.Text==text or text=='Copy Result' and obj.Name=='CopyResult') and obj:IsA('TextButton') and obj:IsDescendantOf(gui) then return obj end end
+    for _,obj in ipairs(all) do if not obj._destroyed and (obj.Text==text or text=='Copy Result' and obj.Name=='CopyResult' or text=='Tap' and obj.Name=='TestAndCopy') and obj:IsA('TextButton') and obj:IsDescendantOf(gui) then return obj end end
     error('button missing: '..text)
 end
 local path=assert(TEST_SCRIPT_PATH,'TEST_SCRIPT_PATH missing')
@@ -179,8 +180,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v12',1,true), 'clipboard success failed')
-assert(lastReport.schema==12 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copy sent' and copied:find('UF COPY RESULT v13',1,true), 'clipboard success failed')
+assert(lastReport.schema==13 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -192,7 +193,7 @@ copy.Activated:Fire()
 assert(textBox.Visible and textBox.Text:find('clipboard blocked',1,true), 'clipboard-error fallback failed')
 toclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(not textBox.Visible and copy.Text=='Copied! Send result', 'alternate clipboard fallback failed')
+assert(textBox.Visible and copy.Text=='Copy sent', 'alternate clipboard fallback failed')
 setclipboard, toclipboard = nil, nil
 -- Fresh eligible ball discovered inside the orb: reproduces the reported no-trigger case.
 ball:Destroy()
@@ -413,7 +414,7 @@ local reportCopy
 setclipboard=function(text) reportCopy=text end
 forceJsonFailure=true
 findButton(currentGui,'Copy Result').Activated:Fire()
-assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = robust-copy-result-v12',1,true),
+assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = single-test-copy-v13',1,true),
     'JSON failure did not export readable fallback')
 forceJsonFailure=false
 local oldPosition=root.Position
@@ -422,7 +423,27 @@ findButton(currentGui,'Copy Result').Activated:Fire()
 assert(lastReport.character.position.x=='<non-finite number>' and #lastReport.serializationWarnings>=3,
     'non-finite data not sanitized')
 root.Position=oldPosition
+function playerGui:GetGuiObjectsAtPosition() return {} end
+local oldId=lastReport.reportId
+local oldManualTests=lastReport.manualTestCount
+findButton(currentGui,'Tap').Activated:Fire()
+for i=1,13 do step() end
+assert(lastReport.reportId~=oldId and lastReport.manualTestCount==oldManualTests+1,
+    'single test activation did not generate a fresh report automatically')
+local outputPanel=currentGui:FindFirstChild('Frame')
+local outputText=outputPanel:FindFirstChild('ResultText')
+assert(outputText.Visible and outputText.Text:find(lastReport.reportId,1,true),
+    'fresh report ID missing from on-screen result')
+assert(reportCopy==outputText.Text,'automatic clipboard payload differs from displayed report')
+-- Simulate a clipboard API returning successfully but leaving old contents intact.
+local staleCopy=reportCopy
+setclipboard=function() end
+local beforeStale=lastReport.reportId
+findButton(currentGui,'Tap').Activated:Fire()
+for i=1,13 do step() end
+assert(reportCopy==staleCopy and lastReport.reportId~=beforeStale
+    and outputText.Text:find(lastReport.reportId,1,true),'stale clipboard hid the latest visible report')
 setclipboard=nil
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/single-test-copy/stale clipboard/unsupported input, toggle and cleanup')
