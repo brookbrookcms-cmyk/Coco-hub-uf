@@ -47,11 +47,21 @@ math.clamp = function(x,lo,hi) return math.max(lo,math.min(hi,x)) end
 table.clear = function(t) for k in pairs(t) do t[k]=nil end end
 warn = function(err) failures[#failures+1]=err end
 local clock = 0
+local delayedTasks={}
+task={delay=function(delay, fn) delayedTasks[#delayedTasks+1]={at=clock+delay,fn=fn} end}
+local function flushDelayedTasks()
+    for i=#delayedTasks,1,-1 do
+        if delayedTasks[i].at<=clock then
+            local fn=table.remove(delayedTasks,i).fn
+            fn()
+        end
+    end
+end
 os.clock = function() return clock end
 local all = {}
 local methods = {}
 local function new(class)
-    local obj = {_class=class,_props={Name=class,Position=v(0,0,0),Size=v(1,1,1),
+    local obj = {_class=class,_props={Name=class,Text=class=="TextBox" and "TextBox" or nil,Position=v(0,0,0),Size=v(1,1,1),
         AssemblyLinearVelocity=v(0,0,0),AssemblyAngularVelocity=v(0,0,0),
         CFrame=CFrame.new(v(0,0,0)),AbsoluteSize=v(800,600,0),AbsolutePosition=v(0,0,0)},_signals={}}
     for _,name in ipairs({'AncestryChanged','ChildAdded','ChildRemoved','Destroying','Touched',
@@ -151,6 +161,7 @@ game={GetService=function(_,name) return assert(services[name],name) end}
 local function step()
     clock=clock+0.04
     services.RunService.Heartbeat:Fire()
+    flushDelayedTasks()
     assert(#failures==0,table.concat(failures,'\n'))
 end
 local function findButton(gui,text)
@@ -160,6 +171,7 @@ end
 local path=assert(TEST_SCRIPT_PATH,'TEST_SCRIPT_PATH missing')
 dofile(path)
 local gui=assert(playerGui:FindFirstChild('UFTracker'),'UI missing')
+assert(gui:FindFirstChild('Frame'):FindFirstChild('ResultText').Text=='','default TextBox label must be cleared')
 local panel=gui:FindFirstChild('Frame')
 local slider=assert(panel:FindFirstChild('RadiusSlider'))
 slider.AbsoluteSize=v(186,28,0); slider.AbsolutePosition=v(12,60,0)
@@ -180,8 +192,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copy sent' and copied:find('UF COPY RESULT v13',1,true), 'clipboard success failed')
-assert(lastReport.schema==13 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copy sent' and copied:find('UF COPY RESULT v14',1,true), 'clipboard success failed')
+assert(lastReport.schema==14 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -414,7 +426,7 @@ local reportCopy
 setclipboard=function(text) reportCopy=text end
 forceJsonFailure=true
 findButton(currentGui,'Copy Result').Activated:Fire()
-assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = single-test-copy-v13',1,true),
+assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = explicit-result-output-v14',1,true),
     'JSON failure did not export readable fallback')
 forceJsonFailure=false
 local oldPosition=root.Position
@@ -427,6 +439,7 @@ function playerGui:GetGuiObjectsAtPosition() return {} end
 local oldId=lastReport.reportId
 local oldManualTests=lastReport.manualTestCount
 findButton(currentGui,'Tap').Activated:Fire()
+assert(currentGui:FindFirstChild('Frame'):FindFirstChild('ResultText').Text:find('Running input test',1,true),'test progress not visible')
 for i=1,13 do step() end
 assert(lastReport.reportId~=oldId and lastReport.manualTestCount==oldManualTests+1,
     'single test activation did not generate a fresh report automatically')
@@ -444,6 +457,16 @@ for i=1,13 do step() end
 assert(reportCopy==staleCopy and lastReport.reportId~=beforeStale
     and outputText.Text:find(lastReport.reportId,1,true),'stale clipboard hid the latest visible report')
 setclipboard=nil
+-- Export must not depend on another tracking Heartbeat firing.
+local beforeNoHeartbeat=lastReport.reportId
+findButton(currentGui,'Tap').Activated:Fire()
+clock=clock+0.6
+flushDelayedTasks()
+assert(lastReport.reportId~=beforeNoHeartbeat and outputText.Text:find(lastReport.reportId,1,true),
+    'tracking heartbeat stall prevented result output')
+findButton(currentGui,'×').Activated:Fire()
+clock=clock+0.6; flushDelayedTasks()
+assert(not playerGui:FindFirstChild('UFTracker'),'closed UI retained delayed report')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/single-test-copy/stale clipboard/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/single-test-copy/explicit text/stale clipboard/unsupported input, toggle and cleanup')
