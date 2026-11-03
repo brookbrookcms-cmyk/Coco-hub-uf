@@ -10,11 +10,19 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 ## Controls
 
-- Drag the title with mouse or touch; Hide reveals a UF reopen button.
-- Adjust the radius from 5–100 studs; toggle the visible orb independently.
-- Pause suspends boundary detection; lifecycle observations continue.
-- Report opens selectable JSON text for manual copying. No clipboard API is needed.
-- Close disconnects listeners and destroys the UI/orb. Running again closes the prior copy.
+The compact panel is 210 × 112 pixels.
+
+- Drag the UF · ORB title to move the panel with mouse or touch.
+- Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
+- ON/OFF controls both orb visibility and boundary detection; lifecycle diagnostics continue.
+- The … button opens selectable diagnostic JSON below the panel.
+- × closes the script and cleans up. Running again replaces the prior instance.
+
+Load the current version in an environment supporting HttpGet and loadstring:
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/brookbrookcms-cmyk/Coco-hub-uf/main/uf-tracker.client.luau"))()
+```
 
 ## Discovery and identity
 
@@ -39,7 +47,7 @@ once per Instance, not once per acceleration. This deliberately merges distinct 
 if the game reuses one Instance; the report does not establish a reliable throw separator.
 
 A first sample already inside does not trigger: the ball must first be observed outside.
-Radius changes, pause/resume and respawn reset the crossing baseline without rearming
+Radius changes, switching off/on and respawn reset the crossing baseline without rearming
 an already-triggered ball. Anchored balls and balls moving at 5 studs/s or less do not
 trigger. Ball/player position-derived speed above 250 studs/s or sample gaps over 0.25 s
 suppress crossings. These are configurable heuristics, not verified UF rules.
@@ -76,6 +84,6 @@ Live checklist:
    all events must retain the same ID. Secondary acceleration must not rearm it.
 3. Compare near-thrower and receiver contacts; neither should claim a catch.
 4. Repeat with OuterShell, a direct destruction and a newly spawned football.
-5. Respawn, change sessions, pause/resume and change radius; ensure no baseline trigger.
-6. Hide/reopen, drag on mobile, select report text, rerun, and close; ensure no duplicate
+5. Respawn, change sessions, switch off/on and change radius; ensure no baseline trigger.
+6. Drag the panel and slider on mobile, toggle off/on, select report text, rerun, and close; ensure no duplicate
    UI or surviving orb/listeners. Compare a report against manually observed gameplay.
