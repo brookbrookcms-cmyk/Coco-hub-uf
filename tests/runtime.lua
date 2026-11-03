@@ -56,7 +56,7 @@ local function new(class)
         CFrame=CFrame.new(v(0,0,0)),AbsoluteSize=v(800,600,0),AbsolutePosition=v(0,0,0)},_signals={}}
     for _,name in ipairs({'AncestryChanged','ChildAdded','ChildRemoved','Destroying','Touched',
         'InputBegan','InputEnded','InputChanged','Activated','Event','DescendantAdded',
-        'Heartbeat','CharacterRemoving'}) do obj._signals[name]=signal() end
+        'Heartbeat','CharacterRemoving','TouchTap'}) do obj._signals[name]=signal() end
     setmetatable(obj,{
         __index=function(t,k) if k=="ClassName" then return t._class end; return methods[k] or t._signals[k] or t._props[k] end,
         __newindex=function(t,k,value)
@@ -146,7 +146,7 @@ local function step()
     assert(#failures==0,table.concat(failures,'\n'))
 end
 local function findButton(gui,text)
-    for _,obj in ipairs(all) do if not obj._destroyed and obj.Text==text and obj:IsA('TextButton') and obj:IsDescendantOf(gui) then return obj end end
+    for _,obj in ipairs(all) do if not obj._destroyed and (obj.Text==text or text=='Copy Result' and obj.Name=='CopyResult') and obj:IsA('TextButton') and obj:IsDescendantOf(gui) then return obj end end
     error('button missing: '..text)
 end
 local path=assert(TEST_SCRIPT_PATH,'TEST_SCRIPT_PATH missing')
@@ -172,8 +172,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v6',1,true), 'clipboard success failed')
-assert(lastReport.schema==6 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v7',1,true), 'clipboard success failed')
+assert(lastReport.schema==7 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -200,14 +200,24 @@ step()
 assert(root.Position.X>3.9 and root.Position.X<4.1,'slower approach intermediate position wrong')
 step()
 assert(root.Position.X>7.9 and root.Position.X<8.1,'approach should continue')
+local tapCount=0
+firesignal=function(sig, positions, processed)
+    assert(sig==services.UserInputService.TouchTap and positions[1] and processed==false,'wrong touch signature')
+    tapCount=tapCount+1
+    sig:Fire(positions,processed)
+end
+ball.Touched:Fire(catchbox)
+assert(tapCount==1,'local contact did not dispatch tap')
 step()
 assert(root.Position.X==10,'approach did not arrive at ball')
+assert(tapCount==1,'arrival duplicated contact tap')
 assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
 ball.Position=v(12,0,0)
 step()
 assert(root.Position.X==12,'hold should follow current ball position')
 step(); step(); step(); step()
 assert(root.Position.X==0,'hold timeout failed to restore')
+firesignal=nil
 copy.Activated:Fire()
 local returned, arrived
 for _,event in ipairs(lastReport.events) do
@@ -244,6 +254,31 @@ assert(root.Position.X>0,'new attempt should advance before ball destruction')
 ball:Destroy()
 step()
 assert(root.Position.X==0,'ball destruction during approach did not restore')
+-- Without executor input APIs, arrival should log unsupported input without crashing.
+local currentInputGui=playerGui:FindFirstChild('UFTracker')
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); step(); step(); step()
+findButton(currentInputGui,'Copy Result').Activated:Fire()
+assert(lastReport.input.lastResult=='unsupported_or_blocked','blocked input not reported')
+ball:Destroy(); step()
+assert(root.Position.X==0,'unsupported-input attempt did not restore')
+local mouseEvents={}
+services.VirtualInputManager=new('VirtualInputManager')
+function services.VirtualInputManager:SendMouseButtonEvent(x,y,button,down)
+    assert(button==0 and x>=0 and y>=0,'invalid mouse event')
+    mouseEvents[#mouseEvents+1]=down
+end
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); step(); step(); step()
+assert(#mouseEvents==2 and mouseEvents[1]==true and mouseEvents[2]==false,'mouse fallback did not release')
+findButton(currentInputGui,'Copy Result').Activated:Fire()
+assert(lastReport.input.lastResult=='dispatched_VirtualInputManager_mouse','mouse fallback not reported')
+ball:Destroy(); step()
+services.VirtualInputManager=nil
 -- Local association ends movement without snapping back, including subsequent OFF.
 local currentGui=playerGui:FindFirstChild('UFTracker')
 ball=child(field,'Football','MeshPart')
@@ -287,4 +322,4 @@ findButton(currentGui,'ON').Activated:Fire()
 assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, tap dedup/unsupported input, toggle and cleanup')
