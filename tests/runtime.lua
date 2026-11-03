@@ -107,6 +107,7 @@ local services={Workspace=new('Workspace'),Players=new('Players'),RunService=new
     UserInputService=new('UserInputService'),HttpService=new('HttpService'),GuiService=new('GuiService')}
 function services.GuiService:GetGuiInset() return Vector2.new(0,58), Vector2.new(0,0) end
 local lastReport
+local forceJsonFailure=false
 function services.HttpService:JSONEncode(data)
     local function serializable(value)
         local kind = type(value)
@@ -118,6 +119,7 @@ function services.HttpService:JSONEncode(data)
     end
     serializable(data)
     lastReport = data
+    if forceJsonFailure then error("Can't convert to JSON") end
     return '{"mockJSON":true}'
 end
 -- Roblox does not promise the ordering our original mock assumed.
@@ -177,8 +179,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v11',1,true), 'clipboard success failed')
-assert(lastReport.schema==11 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v12',1,true), 'clipboard success failed')
+assert(lastReport.schema==12 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -407,5 +409,20 @@ findButton(currentGui,'Tap').Activated:Fire()
 assert(#targetEvents==oldCount,'blocked overlay should prevent input dispatch')
 findButton(currentGui,'Copy Result').Activated:Fire()
 assert(lastReport.input.lastResult=='unsupported_or_blocked','all-blocked input not reported')
+local reportCopy
+setclipboard=function(text) reportCopy=text end
+forceJsonFailure=true
+findButton(currentGui,'Copy Result').Activated:Fire()
+assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = robust-copy-result-v12',1,true),
+    'JSON failure did not export readable fallback')
+forceJsonFailure=false
+local oldPosition=root.Position
+root.Position=v(0/0,math.huge,-math.huge)
+findButton(currentGui,'Copy Result').Activated:Fire()
+assert(lastReport.character.position.x=='<non-finite number>' and #lastReport.serializationWarnings>=3,
+    'non-finite data not sanitized')
+root.Position=oldPosition
+setclipboard=nil
+
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/unsupported input, toggle and cleanup')
