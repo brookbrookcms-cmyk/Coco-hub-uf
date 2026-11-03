@@ -1,8 +1,11 @@
-# Coco Hub UF — tracking foundation
+# Coco Hub UF — orb auto-catch attempts
 
 `uf-tracker.client.luau` is a standalone client-side Luau script. It observes the
 verified UF match hierarchy and provides an adjustable spherical orb and diagnostics.
-It performs no teleporting, automatic catching, remote calls, or catch validation.
+When an eligible football crosses the enabled orb, it attempts a client-side move to
+the ball, then restores the saved position, rotation and velocities on the next physics
+step. It makes no remote calls and cannot confirm server catch validation. Movement
+may be visible, rejected or corrected; this is not guaranteed catching.
 
 Run the complete file in a Roblox client environment. It uses standard Roblox APIs,
 with no executor-specific functions, downloads, clipboard APIs, or external libraries.
@@ -12,9 +15,9 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 112 pixels.
 
-- Drag the UF · ORB title to move the panel with mouse or touch.
+- Drag the UF · AUTO CATCH title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
-- ON/OFF controls both orb visibility and boundary detection; lifecycle diagnostics continue.
+- ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - The … button opens selectable diagnostic JSON below the panel.
 - × closes the script and cleans up. Running again replaces the prior instance.
 
@@ -55,8 +58,7 @@ suppress crossings. These are configurable heuristics, not verified UF rules.
 Other local scripts can listen to the `BoundaryCrossed` BindableEvent under
 `Players.LocalPlayer.PlayerGui.UFTracker`. The payload contains `instance`, `id`,
 `position`, `velocity`, `distance`, and `timestamp`. Position and distance are from the
-current sample, not an interpolated boundary intersection. The event does not move
-the player or claim a catch.
+current sample, not an interpolated boundary intersection. The built-in listener attempts movement on this event. The event does not establish a catch.
 
 ## Evidence and limits
 
@@ -68,6 +70,12 @@ It does not yet predict trajectories, classify thrower vs receiver contacts, ins
 possession attributes, or provide manual outcome labeling. Reparenting to a player is
 reported as association; contacts and association do not prove possession.
 
+Catch attempts are serialized, once per tracked ball Instance. A simultaneous second
+boundary event is logged as skipped rather than queued. Dead or seated characters are
+excluded. Closing, switching off or removing the character cancels a pending attempt;
+a replacement character is never moved back to the old position. No touch synthesis,
+catch input simulation, server bypass or possession confirmation is implemented.
+
 Closing clears the report. Destroyed football records and their event connections are
 released. A temporarily unparented but undestroyed ball remains tracked intentionally.
 
@@ -75,7 +83,7 @@ released. A temporarily unparented but undestroyed ball remains tracked intentio
 
 Local checks: Lua 5.4-compatible syntax parse and numerical segment-distance cases.
 Roblox API execution, UI behavior, replication behavior and mobile executor support
-require live validation. No server catch behavior has been tested.
+require live validation. No server catch behavior or local teleport behavior has been tested in UF.
 
 Live checklist:
 
@@ -87,3 +95,8 @@ Live checklist:
 5. Respawn, change sessions, switch off/on and change radius; ensure no baseline trigger.
 6. Drag the panel and slider on mobile, toggle off/on, select report text, rerun, and close; ensure no duplicate
    UI or surviving orb/listeners. Compare a report against manually observed gameplay.
+
+7. With auto catch ON, verify one catch_attempt and next-step return per eligible ball.
+   Check original position/orientation/velocity restoration, OFF/close cancellation,
+   respawn, death, seated state and overlapping balls. Confirm catch outcome manually;
+   neither a successful local move nor player association proves a catch.
