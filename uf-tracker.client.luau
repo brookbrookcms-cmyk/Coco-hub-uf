@@ -69,18 +69,27 @@ local function restoreMove(reason)
     local saved = pendingMove
     if not saved then return end
     pendingMove = nil
+    local parent = saved.ball and saved.ball.Parent
+    local associatedWith = parent and parent.Parent == Workspace and parent.Name or nil
+    if not associatedWith and saved.record then associatedWith = saved.record.associatedWith end
+    local keepPosition = associatedWith ~= nil and associatedWith == player.Name
     local ok, err = false, nil
     -- Never move a replacement character or restore after the original character died.
     if player.Character == saved.character and saved.root:IsDescendantOf(saved.character)
         and saved.humanoid.Health > 0 then
         ok, err = pcall(function()
-            saved.root.CFrame = saved.cframe
-            saved.root.AssemblyLinearVelocity = saved.linear
-            saved.root.AssemblyAngularVelocity = saved.angular
+            if not keepPosition then
+                saved.root.CFrame = saved.cframe
+                saved.root.AssemblyLinearVelocity = saved.linear
+                saved.root.AssemblyAngularVelocity = saved.angular
+            end
         end)
     end
     resetBoundaries()
-    emit("catch_attempt_return", nil, { id = saved.id, reason = reason, restored = ok,
+    emit(keepPosition and "catch_attempt_finished" or "catch_attempt_return", nil,
+        { id = saved.id, reason = reason, restored = ok and not keepPosition,
+        positionKept = ok and keepPosition, associatedPlayer = associatedWith,
+        outcome = "Association observed; possession unconfirmed",
         heldSeconds = saved.attemptAt and os.clock() - saved.attemptAt,
         heartbeatDelta = saved.heartbeat and heartbeatIndex - saved.heartbeat,
         error = err and tostring(err) })
@@ -147,7 +156,9 @@ local function registerBall(ball)
     records[ball] = record
     emit("discovered", record, snapshot(ball))
     local function transition()
-        record.associated = record.associated or association(ball) ~= nil
+        local associatedWith = association(ball)
+        record.associatedWith = associatedWith or record.associatedWith
+        record.associated = record.associated or associatedWith ~= nil
         if record.associated then record.state = "PLAYER_ASSOCIATED" end
         emit("transition", record, { snapshot = snapshot(ball), player = association(ball) })
     end
@@ -235,7 +246,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v5", 12, 4, 120, 26)
+local title = label("UF · CATCH v6", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -330,7 +341,7 @@ local function buildResult()
     for ball, record in pairs(records) do
         local ok, info = pcall(function()
             return { id = record.id, state = record.state, triggered = record.triggered,
-                associated = record.associated, lastGate = record.lastGate, minDistance = record.minDistance, snapshot = snapshot(ball),
+                associated = record.associated, associatedPlayer = record.associatedWith, lastGate = record.lastGate, minDistance = record.minDistance, snapshot = snapshot(ball),
                 distance = root and (ball.Position - root.Position).Magnitude,
                 physicsSpeed = ball.AssemblyLinearVelocity.Magnitude, lastDerivedSpeed = record.derivedSpeed,
                 lastSampleAge = record.time and os.clock() - record.time,
@@ -347,7 +358,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 5, build = "slow-approach-hold-v5", placeId = tostring(game.PlaceId),
+    local data = { schema = 6, build = "keep-local-association-v6", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
@@ -358,7 +369,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v5\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v6\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -434,7 +445,10 @@ local function updatePendingMove(now)
     end
     local record = records[saved.ball]
     if not record or not saved.ball:IsDescendantOf(Workspace) then restoreMove("ball_ended"); return end
-    if record.associated then restoreMove("player_association_observed"); return end
+    if record.associated then
+        restoreMove(record.associatedWith == player.Name and "local_player_association" or "other_player_association")
+        return
+    end
     if saved.ball.Anchored then restoreMove("ball_anchored"); return end
     local elapsed = now - saved.attemptAt
     if elapsed >= config.approachSeconds + config.holdSeconds then restoreMove("hold_completed"); return end
@@ -495,7 +509,7 @@ connect(boundary.Event, function(payload)
         end
     end
     pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
-        attemptAt = os.clock(), heartbeat = heartbeatIndex, ball = ball, catchOffset = catchOffset,
+        attemptAt = os.clock(), heartbeat = heartbeatIndex, ball = ball, record = record, catchOffset = catchOffset,
         cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
     attemptCount = attemptCount + 1
     resetBoundaries()
