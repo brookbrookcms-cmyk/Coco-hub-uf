@@ -20,9 +20,10 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v7 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v8 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
+- Tap sends a standalone input test without moving the character; it also works with tracking OFF.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
   If unavailable or blocked, selectable text opens below the panel for manual copying.
 - The … button opens/closes the selectable diagnostic report without using the clipboard.
@@ -123,7 +124,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v7`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v8`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -195,3 +196,23 @@ invented or invoked. Copy Result includes `input` capabilities/results and `catc
 events with source, method, dispatch status and errors. These distinguish movement from
 input support. Tests cover contact dispatch, arrival deduplication, unavailable input,
 and mouse down/up fallback; real UF activation still requires live validation.
+
+## v8 engine touch input
+
+The v7 report showed `firesignal(TouchTap)` returning successfully while no normal catch
+animation appeared. v8 removes that input route. It attempts engine touch start (0) and
+end (2) using VirtualInputManager:SendTouchEvent, then a mouse press/release if touch
+calls fail. The call signature/state values were checked against Roblox's input-testing
+code distributed in its client:
+[dispatchEvent.lua](https://github.com/MaximumADHD/Roblox-Client-Tracker/blob/b0b3ae8c43bceac05392f05b9c315de03f280ac1/CompiledPackages/DomTestingLibrary/65d10c98/DomTestingLibrary/jsHelpers/dispatchEvent.lua).
+Roblox documents [VirtualInputManager](https://github.com/Roblox/creator-docs/blob/main/content/en-us/reference/engine/classes/VirtualInputManager.yaml)
+as an internal service; executor access is not guaranteed. No attempt is made to elevate
+permissions. Dispatch success still does not establish that UF activates a catch.
+
+The small Tap button tests this input route without character movement, including while
+the orb is OFF. Press it once while eligible to catch and compare the animation with a
+normal screen tap. Copy Result records a `manual_input_test` catch_input event with the
+method, errors and dispatch status. This avoids needing another full pass to establish
+basic input support. Mock tests cover paired engine touch, manual Tap, removal of the
+obsolete signal route, mouse fallback and unavailable input. Actual animation and catch
+behavior remain unverified outside the user's client.
