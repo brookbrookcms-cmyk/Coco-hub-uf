@@ -15,7 +15,7 @@ if previous then
     previous:Destroy()
 end
 
-local config = { radius = 20, sampleHz = 30, jumpSpeed = 250, maxEvents = 400, approachSeconds = 0.10, holdSeconds = 0.20 }
+local config = { radius = 20, sampleHz = 30, jumpSpeed = 250, maxEvents = 400, approachSeconds = 0.10, holdSeconds = 0.20, tapHoldSeconds = 0.06 }
 local running, closed, visible = true, false, true
 local records, boxes, connections, events = {}, {}, {}, {}
 local nextId, eventCount, lastSample, lastDiscovery, lastUi = 0, 0, 0, 0, 0
@@ -24,6 +24,8 @@ local heartbeatIndex = 0
 local runtimeError, errorAt, attemptCount = nil, 0, 0
 local status
 local callbackErrors = {}
+local inputAnimationProbes = {}
+local animationSnapshot
 local boundary = Instance.new("BindableEvent")
 boundary.Name = "BoundaryCrossed"
 local gui = Instance.new("ScreenGui")
@@ -62,12 +64,24 @@ end
 -- Keep a single outstanding move so off/close/respawn can safely cancel it.
 local pendingMove
 local requestCatchTap
+local pendingInput
+local function releaseInput(reason)
+    local input = pendingInput
+    if not input then return end
+    pendingInput = nil
+    local ok, err = pcall(input.release)
+    if not ok then ok, err = pcall(input.release) end
+    emit("catch_input_release", input.record, { method = input.method, released = ok,
+        reason = reason, heldSeconds = os.clock() - input.startedAt,
+        error = not ok and tostring(err) or nil })
+end
 local function resetBoundaries()
     for _, record in pairs(records) do
         record.relative, record.rootPosition, record.rootRef = nil, nil, nil
     end
 end
 local function restoreMove(reason)
+    releaseInput(reason)
     local saved = pendingMove
     if not saved then return end
     pendingMove = nil
@@ -251,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v9", 12, 4, 120, 26)
+local title = label("UF · CATCH v10", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -366,13 +380,14 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 9, build = "tap-coordinate-feedback-fix-v9", placeId = tostring(game.PlaceId),
+    local data = { schema = 10, build = "held-input-animation-probe-v10", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
             ignoredSyntheticTaps = ignoredSyntheticTaps,
             lastInjectedScreenPoint = lastInjectedScreenPoint and { x = lastInjectedScreenPoint.X, y = lastInjectedScreenPoint.Y },
-            firesignalAvailable = type(firesignal) == "function" },
+            firesignalAvailable = type(firesignal) == "function",
+            pressPending = pendingInput ~= nil, animationsNow = animationSnapshot and animationSnapshot() },
         callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
         retainedEvents = #events, fieldPath = pathNodes, fieldChildren = fieldChildren,
         character = { exists = character ~= nil, rootFound = root ~= nil, humanoidFound = humanoid ~= nil,
@@ -381,7 +396,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v9\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v10\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -427,6 +442,7 @@ local function cleanup()
     table.clear(boxes)
     table.clear(events)
     table.clear(callbackErrors)
+    table.clear(inputAnimationProbes)
     gui:Destroy()
 end
 button("×", 174, 4, 24, 24, cleanup)
@@ -464,8 +480,36 @@ connect(UserInputService.TouchTap, function(positions, processed)
         lastRealTap, realTapCount = positions[1], realTapCount + 1
     end
 end)
+animationSnapshot = function()
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return { available = false, tracks = {} } end
+    local ok, tracks = pcall(function()
+        local result = {}
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            table.insert(result, { name = track.Name, id = track.Animation and track.Animation.AnimationId,
+                priority = tostring(track.Priority), playing = track.IsPlaying })
+        end
+        return result
+    end)
+    return { available = ok, tracks = ok and tracks or {}, error = not ok and tostring(tracks) or nil }
+end
+for _, name in ipairs({ "InputBegan", "InputEnded" }) do
+    connect(UserInputService[name], function(input, processed)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            emit("engine_input_observed", nil, { event = name, type = tostring(input.UserInputType),
+                state = tostring(input.UserInputState), processed = processed,
+                injectionWindow = os.clock() <= ignoreTapUntil })
+        end
+    end)
+end
 requestCatchTap = function(saved, source)
     if closed then return end
+    if pendingInput then
+        emit("catch_input_skipped", nil, { reason = "press_already_active", source = source })
+        return
+    end
     local record
     if source ~= "manual_input_test" then
         if not running or not saved or saved ~= pendingMove or saved.tapAttempted then return end
@@ -483,6 +527,7 @@ requestCatchTap = function(saved, source)
             if not tapHitsPanel(candidate) then point = candidate; break end
         end
     end
+    local beforeAnimations = animationSnapshot()
     local errors, dispatched, method = {}, false, "none"
     local insetOk, inset = pcall(function() return GuiService:GetGuiInset() end)
     if not insetOk then inset = Vector2.new(0, 0); table.insert(errors, "GUI inset unavailable") end
@@ -498,22 +543,25 @@ requestCatchTap = function(saved, source)
             -- These internal APIs may be unavailable at the executor's permission level.
             local touchId = 123456 + heartbeatIndex
             local down, downError = pcall(function() service:SendTouchEvent(touchId, 0, screenPoint.X, screenPoint.Y) end)
-            local up, upError = pcall(function() service:SendTouchEvent(touchId, 2, screenPoint.X, screenPoint.Y) end)
-            if not up then pcall(function() service:SendTouchEvent(touchId, 2, screenPoint.X, screenPoint.Y) end) end
-            dispatched, method = down and up, "VirtualInputManager_touch"
-            if not down then table.insert(errors, tostring(downError)) end
-            if not up then table.insert(errors, tostring(upError)) end
-            if not dispatched then
+            dispatched, method = down, "VirtualInputManager_touch"
+            local release = function() service:SendTouchEvent(touchId, 2, screenPoint.X, screenPoint.Y) end
+            if not down then
+                table.insert(errors, tostring(downError))
                 local mouseDown, mouseDownError = pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, true, game, 0) end)
-                local mouseUp, mouseUpError = pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, false, game, 0) end)
-                if not mouseUp then pcall(function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, false, game, 0) end) end
-                dispatched, method = mouseDown and mouseUp, "VirtualInputManager_mouse"
+                dispatched, method = mouseDown, "VirtualInputManager_mouse"
+                release = function() service:SendMouseButtonEvent(screenPoint.X, screenPoint.Y, 0, false, game, 0) end
                 if not mouseDown then table.insert(errors, tostring(mouseDownError)) end
-                if not mouseUp then table.insert(errors, tostring(mouseUpError)) end
+            end
+            if dispatched then
+                pendingInput = { record = record, method = method, startedAt = os.clock(),
+                    releaseAt = os.clock() + config.tapHoldSeconds, release = release }
             end
         else table.insert(errors, tostring(service)) end
     else table.insert(errors, "No tap point outside tracker UI") end
     lastInputResult = dispatched and ("dispatched_" .. method) or "unsupported_or_blocked"
+    if #inputAnimationProbes >= 8 then table.remove(inputAnimationProbes, 1) end
+    table.insert(inputAnimationProbes, { at = os.clock() + 0.25, record = record,
+        source = source, method = method, before = beforeAnimations })
     emit("catch_input", record, { source = source, method = method, dispatched = dispatched,
         point = point and { x = point.X, y = point.Y },
         screenPoint = screenPoint and { x = screenPoint.X, y = screenPoint.Y },
@@ -612,6 +660,15 @@ end)
 connect(RunService.Heartbeat, function()
     heartbeatIndex = heartbeatIndex + 1
     local now = os.clock()
+    if pendingInput and now >= pendingInput.releaseAt then releaseInput("hold_elapsed") end
+    for i = #inputAnimationProbes, 1, -1 do
+        local probe = inputAnimationProbes[i]
+        if now >= probe.at then
+            emit("input_animation_probe", probe.record, { source = probe.source, method = probe.method,
+                before = probe.before, after = animationSnapshot() })
+            table.remove(inputAnimationProbes, i)
+        end
+    end
     updatePendingMove(now)
     if now - lastDiscovery >= 1 then lastDiscovery = now; discover() end
     local character = player.Character
