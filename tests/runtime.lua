@@ -1,0 +1,177 @@
+-- Small Roblox test double: exercises the complete script, not real replication/physics.
+local failures = {}
+local function signal()
+    local listeners = {}
+    return {
+        Connect = function(self, fn)
+            local c = { Connected = true }
+            function c:Disconnect() self.Connected = false end
+            listeners[#listeners + 1] = { connection = c, fn = fn }
+            return c
+        end,
+        Fire = function(self, ...)
+            local copy = { table.unpack(listeners) }
+            for _, entry in ipairs(copy) do
+                if entry.connection.Connected then entry.fn(...) end
+            end
+        end,
+    }
+end
+local vectorMt = {}
+local function v(x,y,z) return setmetatable({X=x,Y=y,Z=z}, vectorMt) end
+vectorMt.__add = function(a,b) return v(a.X+b.X,a.Y+b.Y,a.Z+b.Z) end
+vectorMt.__sub = function(a,b) return v(a.X-b.X,a.Y-b.Y,a.Z-b.Z) end
+vectorMt.__mul = function(a,b) return v(a.X*b,a.Y*b,a.Z*b) end
+vectorMt.__index = function(a,k)
+    if k == 'Magnitude' then return math.sqrt(a.X*a.X+a.Y*a.Y+a.Z*a.Z) end
+    if k == 'Dot' then return function(a,b) return a.X*b.X+a.Y*b.Y+a.Z*b.Z end end
+end
+Vector3 = { new=v, zero=v(0,0,0) }
+Vector2 = { new=function(x,y) return {X=x,Y=y} end }
+local cframeMt = {}
+cframeMt.__mul = function(a,b) return setmetatable({Position=a.Position,Rotation=b}, cframeMt) end
+CFrame = { new=function(p) return setmetatable({Position=p,Rotation={}}, cframeMt) end }
+UDim = {new=function(s,o) return {Scale=s,Offset=o} end}
+UDim2 = {new=function(xs,xo,ys,yo) return {X=UDim.new(xs,xo),Y=UDim.new(ys,yo)} end}
+UDim2.fromOffset = function(x,y) return UDim2.new(0,x,0,y) end
+Color3 = {new=function(...) return {...} end,fromRGB=function(...) return {...} end}
+Enum = setmetatable({}, {__index=function(self,k)
+    local group = setmetatable({}, {__index=function(_,value) return k..'.'..value end})
+    rawset(self,k,group); return group
+end})
+math.clamp = function(x,lo,hi) return math.max(lo,math.min(hi,x)) end
+table.clear = function(t) for k in pairs(t) do t[k]=nil end end
+warn = function(err) failures[#failures+1]=err end
+local clock = 0
+os.clock = function() return clock end
+local all = {}
+local methods = {}
+local function new(class)
+    local obj = {_class=class,_props={Name=class,Position=v(0,0,0),Size=v(1,1,1),
+        AssemblyLinearVelocity=v(0,0,0),AssemblyAngularVelocity=v(0,0,0),
+        CFrame=CFrame.new(v(0,0,0)),AbsoluteSize=v(800,600,0),AbsolutePosition=v(0,0,0)},_signals={}}
+    for _,name in ipairs({'AncestryChanged','ChildAdded','ChildRemoved','Destroying','Touched',
+        'InputBegan','InputEnded','InputChanged','Activated','Event','DescendantAdded',
+        'Heartbeat','CharacterRemoving'}) do obj._signals[name]=signal() end
+    setmetatable(obj,{
+        __index=function(t,k) return methods[k] or t._signals[k] or t._props[k] end,
+        __newindex=function(t,k,value)
+            t._props[k]=value
+            if k=='CFrame' then t._props.Position=value.Position end
+        end,
+    })
+    all[#all+1]=obj
+    return obj
+end
+function methods:IsA(class) return self._class==class or class=='BasePart' and (self._class=='Part' or self._class=='MeshPart') end
+function methods:GetChildren()
+    local out={}
+    for _,obj in ipairs(all) do if obj.Parent==self then out[#out+1]=obj end end
+    return out
+end
+function methods:FindFirstChild(name)
+    for _,child in ipairs(self:GetChildren()) do if child.Name==name then return child end end
+end
+function methods:WaitForChild(name) return assert(self:FindFirstChild(name),name) end
+function methods:FindFirstChildOfClass(class)
+    for _,child in ipairs(self:GetChildren()) do if child:IsA(class) then return child end end
+end
+function methods:IsDescendantOf(parent)
+    local node=self.Parent
+    while node do if node==parent then return true end; node=node.Parent end
+    return false
+end
+function methods:GetFullName() return (self.Parent and self.Parent:GetFullName()..'.' or '')..self.Name end
+function methods:GetPropertyChangedSignal(name)
+    self._signals['property:'..name]=self._signals['property:'..name] or signal()
+    return self._signals['property:'..name]
+end
+function methods:CaptureFocus() end
+function methods:Fire(...) self.Event:Fire(...) end
+function methods:Destroy()
+    if self._destroyed then return end
+    self._destroyed=true
+    self.Destroying:Fire()
+    for _,child in ipairs(self:GetChildren()) do child:Destroy() end
+    self.Parent=nil
+end
+Instance={new=function(class,parent) local obj=new(class); obj.Parent=parent; return obj end}
+local function child(parent,name,class)
+    local obj=Instance.new(class or 'Folder',parent); obj.Name=name; return obj
+end
+local services={Workspace=new('Workspace'),Players=new('Players'),RunService=new('RunService'),
+    UserInputService=new('UserInputService'),HttpService=new('HttpService')}
+function services.HttpService:JSONEncode(_) return '{}' end
+local player=child(services.Players,'Tester','Player')
+services.Players.LocalPlayer=player
+local playerGui=child(player,'PlayerGui','PlayerGui')
+local character=child(services.Workspace,'Tester','Model'); player.Character=character
+local root=child(character,'HumanoidRootPart','Part')
+local humanoid=child(character,'Humanoid','Humanoid'); humanoid.Health=100; humanoid.Sit=false
+local field=services.Workspace
+for _,name in ipairs({'ParkMatchMap','Replicated','Fields','MatchField','Replicated'}) do field=child(field,name) end
+local ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(100,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+game={GetService=function(_,name) return assert(services[name],name) end}
+local function step()
+    clock=clock+0.04
+    services.RunService.Heartbeat:Fire()
+    assert(#failures==0,table.concat(failures,'\n'))
+end
+local function findButton(gui,text)
+    for _,obj in ipairs(all) do if not obj._destroyed and obj.Text==text and obj:IsA('TextButton') and obj:IsDescendantOf(gui) then return obj end end
+    error('button missing: '..text)
+end
+local path=assert(TEST_SCRIPT_PATH,'TEST_SCRIPT_PATH missing')
+dofile(path)
+local gui=assert(playerGui:FindFirstChild('UFTracker'),'UI missing')
+local panel=gui:FindFirstChild('Frame')
+local slider=assert(panel:FindFirstChild('RadiusSlider'))
+slider.AbsoluteSize=v(186,28,0); slider.AbsolutePosition=v(12,60,0)
+local orb=assert(gui:FindFirstChild('UFDetectionOrb'))
+local touch={UserInputType=Enum.UserInputType.Touch,Position=v(198,70,0)}
+slider.InputBegan:Fire(touch)
+assert(orb.Radius==100,'slider maximum failed')
+touch.Position=v(12,70,0); services.UserInputService.InputChanged:Fire(touch)
+assert(orb.Radius==5,'slider minimum failed')
+touch.Position=v(12+186*15/95,70,0); services.UserInputService.InputChanged:Fire(touch)
+assert(orb.Radius==20,'slider intermediate value failed')
+services.UserInputService.InputEnded:Fire(touch)
+touch.Position=v(198,70,0); services.UserInputService.InputChanged:Fire(touch)
+assert(orb.Radius==20,'released slider still dragging')
+step()
+assert(root.Position.X==0,'outside ball must not move player')
+-- Fresh eligible ball discovered inside the orb: reproduces the reported no-trigger case.
+ball:Destroy()
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step()
+assert(root.Position.X==10,'inside-first trigger failed to move')
+step()
+assert(root.Position.X==0,'next-step restoration failed')
+step()
+assert(root.Position.X==0,'same instance triggered twice')
+-- OFF suppresses new balls, ON re-evaluates overlap.
+findButton(gui,'ON').Activated:Fire()
+ball:Destroy()
+ball=child(field,'Football','MeshPart')
+ball.Anchored=false; ball.Position=v(15,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
+services.Workspace.DescendantAdded:Fire(ball)
+step(); assert(root.Position.X==0,'OFF still moved player')
+findButton(gui,'OFF').Activated:Fire()
+step(); assert(root.Position.X==15,'ON did not re-evaluate inside ball')
+findButton(gui,'ON').Activated:Fire()
+assert(root.Position.X==0,'OFF did not immediately restore')
+-- Close removes UI and listeners; rerun boots cleanly.
+findButton(gui,'×').Activated:Fire()
+assert(not playerGui:FindFirstChild('UFTracker'),'close did not remove UI')
+step()
+dofile(path)
+assert(playerGui:FindFirstChild('UFTracker'),'rerun failed')
+step(); assert(root.Position.X==15,'rerun did not trigger inside ball')
+local replacement=playerGui:FindFirstChild('UFTracker')
+dofile(path)
+assert(replacement._destroyed and root.Position.X==0,'duplicate execution did not restore/clean prior copy')
+assert(#failures==0,table.concat(failures,'\n'))
+print('PASS: full-script mock boot, touch slider, trigger, return, dedup, toggle, close and duplicate execution')
