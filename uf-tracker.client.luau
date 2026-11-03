@@ -21,6 +21,7 @@ local nextId, eventCount, lastSample, lastDiscovery, lastUi = 0, 0, 0, 0, 0
 local started = os.clock()
 local runtimeError, errorAt, attemptCount = nil, 0, 0
 local status
+local callbackErrors = {}
 local boundary = Instance.new("BindableEvent")
 boundary.Name = "BoundaryCrossed"
 local gui = Instance.new("ScreenGui")
@@ -34,6 +35,8 @@ local function connect(signal, fn, bucket)
         local ok, err = pcall(fn, ...)
         if not ok then
             runtimeError = tostring(err)
+            table.insert(callbackErrors, { t = os.clock() - started, error = runtimeError })
+            if #callbackErrors > 20 then table.remove(callbackErrors, 1) end
             if status then status.Text = "ERROR · " .. runtimeError end
             if os.clock() - errorAt > 2 then
                 errorAt = os.clock()
@@ -78,6 +81,12 @@ local function restoreMove(reason)
     resetBoundaries()
     emit("catch_attempt_return", nil, { id = saved.id, reason = reason, restored = ok,
         error = err and tostring(err) })
+end
+local function setGate(record, reason)
+    if record.lastGate ~= reason then
+        record.lastGate = reason
+        emit("detection_gate", record, { reason = reason, minDistance = record.minDistance })
+    end
 end
 local function snapshot(ball)
     return { name = ball.Name, path = ball:GetFullName(), position = vector(ball.Position),
@@ -168,7 +177,8 @@ local function registerBall(ball)
     record.discoveredAt = os.clock()
     connect(ball.Destroying, function()
         record.state = "ENDED"
-        emit("destroyed", record, snapshot(ball))
+        emit("destroyed", record, { snapshot = snapshot(ball), lastGate = record.lastGate,
+            minDistance = record.minDistance, triggered = record.triggered })
         disconnect(record.connections)
         table.clear(record.shells)
         records[ball] = nil
@@ -210,7 +220,7 @@ orb.Name, orb.Color3, orb.Transparency = "UFDetectionOrb", Color3.fromRGB(175, 7
 orb.AlwaysOnTop, orb.ZIndex, orb.Parent = false, 0, gui
 
 local frame = Instance.new("Frame")
-frame.Size, frame.Position = UDim2.fromOffset(210, 112), UDim2.new(0, 16, 0.2, 0)
+frame.Size, frame.Position = UDim2.fromOffset(210, 142), UDim2.new(0, 16, 0.2, 0)
 frame.BackgroundColor3, frame.Parent = Color3.fromRGB(22, 18, 30), gui
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 local function label(text, x, y, width, height)
@@ -222,7 +232,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v2", 12, 4, 120, 26)
+local title = label("UF · CATCH v3", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -293,15 +303,90 @@ connect(UserInputService.InputEnded, function(input) if input == sliderInput the
 status = label("Waiting for football", 12, 88, 186, 18)
 status.TextSize = 10
 local report = Instance.new("TextBox")
-report.Size, report.Position = UDim2.fromOffset(210, 130), UDim2.fromOffset(0, 118)
+report.Name = "ResultText"
+report.Size, report.Position = UDim2.fromOffset(210, 150), UDim2.fromOffset(0, 148)
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
 report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
+local function buildResult()
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local pathNodes, node = {}, Workspace
+    for _, name in ipairs({ "ParkMatchMap", "Replicated", "Fields", "MatchField", "Replicated" }) do
+        node = node and node:FindFirstChild(name)
+        table.insert(pathNodes, { name = name, found = node ~= nil })
+    end
+    local balls, catchboxes, fieldChildren = {}, {}, {}
+    if node then
+        for i, child in ipairs(node:GetChildren()) do
+            if i > 32 then break end
+            table.insert(fieldChildren, { name = child.Name, class = child.ClassName })
+        end
+    end
+    for ball, record in pairs(records) do
+        local ok, info = pcall(function()
+            return { id = record.id, state = record.state, triggered = record.triggered,
+                associated = record.associated, lastGate = record.lastGate, minDistance = record.minDistance, snapshot = snapshot(ball),
+                distance = root and (ball.Position - root.Position).Magnitude,
+                physicsSpeed = ball.AssemblyLinearVelocity.Magnitude, lastDerivedSpeed = record.derivedSpeed,
+                lastSampleAge = record.time and os.clock() - record.time,
+                inWorkspace = ball:IsDescendantOf(Workspace) }
+        end)
+        table.insert(balls, ok and info or { id = record.id, error = tostring(info) })
+    end
+    for box, entry in pairs(boxes) do
+        if entry.owner == player.Name then
+            local ok, info = pcall(function()
+                return { path = box:GetFullName(), position = vector(box.Position), size = vector(box.Size),
+                    canTouch = box.CanTouch, canCollide = box.CanCollide }
+            end)
+            table.insert(catchboxes, ok and info or { error = tostring(info) })
+        end
+    end
+    local data = { schema = 3, build = "copy-result-v3", placeId = tostring(game.PlaceId),
+        placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
+        enabled = running, config = config, status = status.Text, lastError = runtimeError,
+        callbackErrors = callbackErrors, attempts = attemptCount, totalEvents = eventCount,
+        retainedEvents = #events, fieldPath = pathNodes, fieldChildren = fieldChildren,
+        character = { exists = character ~= nil, rootFound = root ~= nil, humanoidFound = humanoid ~= nil,
+            position = root and vector(root.Position), health = humanoid and humanoid.Health,
+            seated = humanoid and humanoid.Sit },
+        pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
+        localCatchboxes = catchboxes, events = events,
+        outcome = "Client observations only; catches not confirmed" }
+    return "UF COPY RESULT v3\n" .. HttpService:JSONEncode(data)
+end
+local function showResult(text)
+    report.Text, report.Visible = text, true
+    report:CaptureFocus()
+    pcall(function()
+        report.CursorPosition = #text + 1
+        report.SelectionStart = 1
+    end)
+end
 button("…", 146, 4, 24, 24, function()
-    report.Text = HttpService:JSONEncode({ version = 1, config = config, totalEvents = eventCount,
-        retainedEvents = #events, outcomes = "Unconfirmed client observations", error = runtimeError, attempts = attemptCount, events = events })
-    report.Visible = not report.Visible
-    if report.Visible then report:CaptureFocus() end
+    if report.Visible then report.Visible = false else showResult(buildResult()) end
+end)
+local copyButton
+copyButton = button("Copy Result", 12, 110, 186, 24, function()
+    local text = buildResult()
+    -- Clipboard APIs are optional; never require them to start the tracker.
+    local clipboardError
+    for _, name in ipairs({ "setclipboard", "toclipboard" }) do
+        local writer = name == "setclipboard" and setclipboard or toclipboard
+        if type(writer) == "function" then
+            local ok, result = pcall(writer, text)
+            if ok and result ~= false then
+                report.Visible = false
+                copyButton.Text = "Copied! Send result"
+                return
+            end
+            clipboardError = tostring(result)
+        end
+    end
+    showResult(text .. (clipboardError and ("\nClipboard error: " .. clipboardError) or ""))
+    copyButton.Text = "Select text below to copy"
 end)
 local function cleanup()
     if closed then return end
@@ -313,6 +398,7 @@ local function cleanup()
     table.clear(records)
     table.clear(boxes)
     table.clear(events)
+    table.clear(callbackErrors)
     gui:Destroy()
 end
 button("×", 174, 4, 24, 24, cleanup)
@@ -331,7 +417,7 @@ connect(UserInputService.InputChanged, function(input)
         local delta = input.Position - dragStart
         local viewport = gui.AbsoluteSize
         frame.Position = UDim2.fromOffset(math.clamp(frameStart.X.Offset + delta.X, 0, math.max(0, viewport.X - 210)),
-            math.clamp(frameStart.Y.Scale * viewport.Y + frameStart.Y.Offset + delta.Y, 0, math.max(0, viewport.Y - 112)))
+            math.clamp(frameStart.Y.Scale * viewport.Y + frameStart.Y.Offset + delta.Y, 0, math.max(0, viewport.Y - 142)))
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
@@ -351,8 +437,19 @@ connect(boundary.Event, function(payload)
     local root = character and character:FindFirstChild("HumanoidRootPart")
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local record = records[ball]
-    if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit or not record
-        or record.associated or ball.Anchored or not ball:IsDescendantOf(Workspace) then return end
+    local reason
+    if not root then reason = "no_root"
+    elseif not humanoid then reason = "no_humanoid"
+    elseif humanoid.Health <= 0 then reason = "dead"
+    elseif humanoid.Sit then reason = "seated"
+    elseif not record then reason = "ball_not_registered"
+    elseif record.associated then reason = "player_associated"
+    elseif ball.Anchored then reason = "anchored"
+    elseif not ball:IsDescendantOf(Workspace) then reason = "outside_workspace" end
+    if reason then
+        emit("catch_attempt_skipped", record, { id = payload.id, reason = reason })
+        return
+    end
     pendingMove = { id = payload.id, character = character, root = root, humanoid = humanoid,
         cframe = root.CFrame, linear = root.AssemblyLinearVelocity, angular = root.AssemblyAngularVelocity }
     local target = ball.Position
@@ -386,19 +483,24 @@ connect(RunService.Heartbeat, function()
         local derived = dt and dt > 0 and (position - record.position).Magnitude / dt or nil
         local jump = derived and derived > config.jumpSpeed
         if jump then emit("discontinuity", record, { derivedSpeed = derived, physicsSpeed = velocity.Magnitude }) end
-        record.position, record.time = position, now
+        record.position, record.time, record.derivedSpeed = position, now, derived
         if running and root and ball:IsDescendantOf(Workspace) and not record.associated then
             local relative = position - root.Position
             local distance = relative.Magnitude
+            record.minDistance = math.min(record.minDistance or math.huge, distance)
             if not nearestDistance or distance < nearestDistance then
                 nearest, nearestDistance, nearestRecord = ball, distance, record
             end
             local rootJump = dt and record.rootPosition and (root.Position - record.rootPosition).Magnitude / dt > config.jumpSpeed
             local eligible = not ball.Anchored and velocity.Magnitude > 5
             local validSegment = dt ~= nil and dt <= 0.25 and record.rootRef == root
+            setGate(record, record.triggered and "already_triggered" or (jump and "ball_position_jump"
+                or (rootJump and "player_position_jump" or (ball.Anchored and "anchored"
+                or (not eligible and "speed_at_or_below_5" or "outside_orb")))))
             if not record.triggered and not jump and not rootJump and eligible
                 and entersOrb(record.relative, relative, config.radius, validSegment) then
                 record.triggered, record.state = true, "APPROACHING"
+                setGate(record, "boundary_triggered")
                 local payload = { instance = ball, id = record.id, position = position, velocity = velocity,
                     distance = distance, timestamp = now - started }
                 emit("boundary_crossed", record, { snapshot = snapshot(ball), distance = distance,
@@ -406,12 +508,16 @@ connect(RunService.Heartbeat, function()
                 boundary:Fire(payload)
             elseif record.state == "DISCOVERED" and eligible then record.state = "AIRBORNE" end
             record.relative, record.rootPosition, record.rootRef = relative, root.Position, root
-        else record.relative, record.rootPosition = nil, nil end
+        else
+            setGate(record, not running and "disabled" or (not root and "no_root"
+                or (record.associated and "player_associated" or "outside_workspace")))
+            record.relative, record.rootPosition = nil, nil
+        end
     end
     if now - lastUi >= 0.2 then
         lastUi = now
         status.Text = runtimeError and ("ERROR · " .. runtimeError) or (not running and "OFF · orb disabled" or (nearestRecord
-            and string.format("%s %.0fs · tries %d", nearestRecord.id, nearestDistance, attemptCount)
+            and string.format("%s %.0f studs · tries %d", nearestRecord.id, nearestDistance, attemptCount)
             or (fieldContainer() and ("No ball · tries " .. attemptCount) or "UF match path not found")))
     end
 end)
