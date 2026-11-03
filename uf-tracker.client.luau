@@ -265,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v12", 12, 4, 120, 26)
+local title = label("UF · CATCH v13", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -401,13 +401,16 @@ local function encodeResult(data)
     local clean = jsonSafe(data, {}, 0, warnings, "result", { remaining = 20000 })
     clean.serializationWarnings = warnings
     local ok, encoded = pcall(function() return HttpService:JSONEncode(clean) end)
-    if ok and type(encoded) == "string" then return "UF COPY RESULT v12\n" .. encoded end
-    return "UF COPY RESULT v12\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
+    if ok and type(encoded) == "string" then return "UF COPY RESULT v13\n" .. encoded end
+    return "UF COPY RESULT v13\nFORMAT: plain-text fallback\nJSON error: " .. tostring(encoded)
         .. "\n" .. plainReport(clean)
 end
 local lastRealTap, realTapCount, lastInputResult = nil, 0, "not_attempted"
 local ignoreTapUntil, ignoredSyntheticTaps = 0, 0
 local lastInjectedScreenPoint
+local reportSerial, manualTestCount = 0, 0
+local scheduledReport
+local publishResult
 local function collectResult()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -444,7 +447,7 @@ local function collectResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 12, build = "robust-copy-result-v12", placeId = tostring(game.PlaceId),
+    local data = { schema = 13, build = "single-test-copy-v13", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -463,15 +466,19 @@ local function collectResult()
     return data
 end
 local function buildResult()
+    reportSerial = reportSerial + 1
     local ok, data = pcall(collectResult)
     if not ok then
-        data = { schema = 12, build = "robust-copy-result-v12", collectionError = tostring(data),
+        data = { schema = 13, build = "single-test-copy-v13", collectionError = tostring(data),
             lastError = runtimeError, events = events, callbackErrors = callbackErrors, attempts = attemptCount }
     end
+    data.reportId = string.format("v13-%d-%.3f", reportSerial, os.clock() - started)
+    data.manualTestCount = manualTestCount
     return encodeResult(data)
 end
-local function showResult(text)
+local function showResult(text, focus)
     report.Text, report.Visible = text, true
+    if focus == false then return end
     report:CaptureFocus()
     pcall(function()
         report.CursorPosition = #text + 1
@@ -481,18 +488,19 @@ end
 button("…", 146, 4, 24, 24, function()
     if report.Visible then report.Visible = false else showResult(buildResult()) end
 end)
-local copyButton
-copyButton = button("Copy Result", 12, 110, 130, 24, function()
+local copyButton, testCopyButton
+publishResult = function()
     local text = buildResult()
-    -- Clipboard APIs are optional; never require them to start the tracker.
+    -- The displayed text is authoritative even if the executor clipboard stays stale.
+    showResult(text, false)
     local clipboardError
     for _, name in ipairs({ "setclipboard", "toclipboard" }) do
         local writer = name == "setclipboard" and setclipboard or toclipboard
         if type(writer) == "function" then
             local ok, result = pcall(writer, text)
             if ok and result ~= false then
-                report.Visible = false
-                copyButton.Text = "Copied! Send result"
+                copyButton.Text = "Copy sent"
+                if testCopyButton then testCopyButton.Text = "Report #" .. reportSerial .. " ready" end
                 return
             end
             clipboardError = tostring(result)
@@ -500,12 +508,25 @@ copyButton = button("Copy Result", 12, 110, 130, 24, function()
     end
     showResult(text .. (clipboardError and ("\nClipboard error: " .. clipboardError) or ""))
     copyButton.Text = "Select text below to copy"
+    if testCopyButton then testCopyButton.Text = "Report #" .. reportSerial .. " below" end
+end
+copyButton = button("Copy", 150, 110, 48, 24, publishResult)
+copyButton.Name, copyButton.TextSize, copyButton.TextScaled = "CopyResult", 10, true
+-- One activation runs the input test and exports after its release/animation probe.
+testCopyButton = button("TEST + COPY", 12, 110, 130, 24, function()
+    manualTestCount = manualTestCount + 1
+    testCopyButton.Text = "Testing #" .. manualTestCount .. "…"
+    report.Visible = false
+    pcall(function() report:ReleaseFocus() end)
+    emit("ui_test_requested", nil, { test = manualTestCount })
+    requestCatchTap(nil, "manual_input_test")
+    scheduledReport = os.clock() + 0.5
 end)
-copyButton.Name = "CopyResult"
-button("Tap", 150, 110, 48, 24, function() requestCatchTap(nil, "manual_input_test") end)
+testCopyButton.Name = "TestAndCopy"
 local function cleanup()
     if closed then return end
     closed = true
+    scheduledReport = nil
     restoreMove("closed")
     disconnect(connections)
     for _, record in pairs(records) do disconnect(record.connections) end
@@ -760,6 +781,10 @@ connect(RunService.Heartbeat, function()
         end
     end
     updatePendingMove(now)
+    if scheduledReport and now >= scheduledReport then
+        scheduledReport = nil
+        publishResult()
+    end
     if now - lastDiscovery >= 1 then lastDiscovery = now; discover() end
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
