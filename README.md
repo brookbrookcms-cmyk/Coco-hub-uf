@@ -81,7 +81,12 @@ released. A temporarily unparented but undestroyed ball remains tracked intentio
 
 ## Validation
 
-Local checks: Lua 5.4-compatible syntax parse and numerical segment-distance cases.
+Local checks: Lua 5.4-compatible syntax parsing, numerical geometry/inside-first cases,
+and restoration guards. `python3 tests/check.py` also runs the full script against the
+small Roblox test double in `tests/runtime.lua`: UI boot, touch slider endpoints/release,
+inside-first trigger, next-step return, one trigger per Instance, OFF/ON, close and
+replacement execution. This requires system liblua5.4. The mock does not implement
+Roblox physics, API property validation, network replication or UF catch rules.
 Roblox API execution, UI behavior, replication behavior and mobile executor support
 require live validation. No server catch behavior or local teleport behavior has been tested in UF.
 
