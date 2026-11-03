@@ -2,10 +2,14 @@
 
 `uf-tracker.client.luau` is a standalone client-side Luau script. It observes the
 verified UF match hierarchy and provides an adjustable spherical orb and diagnostics.
-When an eligible football crosses the enabled orb, it attempts a client-side move to
-the ball, then restores the saved position, rotation and velocities on the following Heartbeat
-dispatch. It makes no remote calls and cannot confirm server catch validation. Movement
-may be visible, rejected or corrected; this is not guaranteed catching.
+When an eligible football crosses the enabled orb, it attempts a client-side approach
+toward the live ball over 0.10 seconds, follows it for 0.20 seconds, then restores the
+saved position, rotation and velocities. It aligns the locally discovered CatchBox center
+with the ball using its starting offset from the root; if none is found it uses the root.
+These durations are config settings, not verified UF catch windows. There is no verified
+automatic catch-input binding: this version controls movement only. It makes no remote
+calls and cannot confirm server catch validation. Movement may be visible, rejected or
+corrected; this is not guaranteed catching.
 
 Run the complete file in a Roblox client environment. It uses standard Roblox APIs,
 with no downloads or external libraries. Clipboard functions are optional and are only used when Copy Result is pressed.
@@ -15,7 +19,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v4 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v5 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
@@ -118,7 +122,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v4`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v5`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -145,3 +149,17 @@ Heartbeat, independent of listener ordering. Return events include `heldSeconds`
 `heartbeatDelta` to verify timing on the actual client. The regression test reproduced
 the old failure with reversed listeners and passes with both listener orders after the fix.
 This fixes the observed scheduling bug; it does not establish server-accepted catches.
+
+## v5 slower movement
+
+The v4 live report confirmed a 17–21 ms hold and contact with the local CatchBox, but
+no established catch. v5 uses `approachSeconds = 0.10` and `holdSeconds = 0.20` instead
+of a one-frame snap. During the approach it interpolates toward the current ball position;
+during the hold it follows the live ball. A player-association transition, destruction,
+anchoring, unavailable character, OFF or close ends the attempt early. Local association
+still does not prove a catch. Concurrent balls do not start overlapping movement attempts.
+
+Diagnostics show approach/hold progress and `catch_movement_started`, `catch_arrived`,
+and return timing. Tests check intermediate positions, moving-ball following, local
+CatchBox offset alignment, configured timeout, ball destruction during movement, and
+OFF/close/duplicate cancellation. Server acceptance and catch input remain unverified.
