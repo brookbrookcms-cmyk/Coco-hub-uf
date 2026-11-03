@@ -1,6 +1,6 @@
 -- Small Roblox test double: exercises the complete script, not real replication/physics.
 local failures = {}
-local function signal()
+local function signal(reverse)
     local listeners = {}
     return {
         Connect = function(self, fn)
@@ -11,7 +11,8 @@ local function signal()
         end,
         Fire = function(self, ...)
             local copy = { table.unpack(listeners) }
-            for _, entry in ipairs(copy) do
+            for i = 1, #copy do
+                local entry = copy[reverse and (#copy - i + 1) or i]
                 if entry.connection.Connected then entry.fn(...) end
             end
         end,
@@ -115,6 +116,9 @@ function services.HttpService:JSONEncode(data)
     lastReport = data
     return '{"mockJSON":true}'
 end
+-- Roblox does not promise the ordering our original mock assumed.
+-- Reverse Heartbeat listeners to reproduce the real same-frame return bug.
+services.RunService._signals.Heartbeat=signal(TEST_HEARTBEAT_REVERSE ~= false)
 local player=child(services.Players,'Tester','Player')
 services.Players.LocalPlayer=player
 local playerGui=child(player,'PlayerGui','PlayerGui')
@@ -158,8 +162,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v3',1,true), 'clipboard success failed')
-assert(lastReport.schema==3 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v4',1,true), 'clipboard success failed')
+assert(lastReport.schema==4 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -184,6 +188,13 @@ copy.Activated:Fire()
 assert(lastReport.attempts==1 and lastReport.pendingMove~='none', 'attempt diagnostic missing')
 step()
 assert(root.Position.X==0,'next-step restoration failed')
+copy.Activated:Fire()
+local returned
+for _,event in ipairs(lastReport.events) do
+    if event.kind=='catch_attempt_return' then returned=event.data end
+end
+assert(returned and returned.heartbeatDelta>=1 and returned.heldSeconds>=0.039,
+    'return must wait for a later heartbeat, never the same dispatch')
 step()
 assert(root.Position.X==0,'same instance triggered twice')
 -- OFF suppresses new balls, ON re-evaluates overlap.
