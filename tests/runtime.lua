@@ -119,6 +119,7 @@ local services={Workspace=new('Workspace'),Players=new('Players'),RunService=new
 function services.GuiService:GetGuiInset() return Vector2.new(0,58), Vector2.new(0,0) end
 local lastReport
 local forceJsonFailure=false
+local previewPayload=""
 function services.HttpService:JSONEncode(data)
     local function serializable(value)
         local kind = type(value)
@@ -131,7 +132,7 @@ function services.HttpService:JSONEncode(data)
     serializable(data)
     lastReport = data
     if forceJsonFailure then error("Can't convert to JSON") end
-    return '{"reportId":"' .. (data.reportId or '') .. '","mockJSON":true}'
+    return '{"reportId":"' .. (data.reportId or '') .. '","mockJSON":true,"payload":"' .. previewPayload .. '"}'
 end
 -- Roblox does not promise the ordering our original mock assumed.
 -- Reverse Heartbeat listeners to reproduce the real same-frame return bug.
@@ -192,8 +193,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copy sent' and copied:find('UF COPY RESULT v14',1,true), 'clipboard success failed')
-assert(lastReport.schema==14 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copy sent' and copied:find('UF COPY RESULT v15',1,true), 'clipboard success failed')
+assert(lastReport.schema==15 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -426,7 +427,7 @@ local reportCopy
 setclipboard=function(text) reportCopy=text end
 forceJsonFailure=true
 findButton(currentGui,'Copy Result').Activated:Fire()
-assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = explicit-result-output-v14',1,true),
+assert(reportCopy:find('FORMAT: plain-text fallback',1,true) and reportCopy:find('result.build = paged-report-snapshot-v15',1,true),
     'JSON failure did not export readable fallback')
 forceJsonFailure=false
 local oldPosition=root.Position
@@ -464,9 +465,22 @@ clock=clock+0.6
 flushDelayedTasks()
 assert(lastReport.reportId~=beforeNoHeartbeat and outputText.Text:find(lastReport.reportId,1,true),
     'tracking heartbeat stall prevented result output')
+previewPayload=string.rep('x',5200)
+setclipboard=function(text) reportCopy=text end
+local beforeRefresh=lastReport.reportId
+findButton(currentGui,'Refresh').Activated:Fire()
+assert(lastReport.reportId~=beforeRefresh and #outputText.Text<=1600 and #reportCopy>5200,
+    'Refresh did not make a new bounded preview with full clipboard data')
+local firstPage=outputText.Text
+assert(outputPanel:FindFirstChild('NextReportPage').Visible,'long report has no page controls')
+outputPanel:FindFirstChild('NextReportPage').Activated:Fire()
+assert(outputText.Text~=firstPage and #outputText.Text<=1600,'next page not bounded or unchanged')
+outputPanel:FindFirstChild('PreviousReportPage').Activated:Fire()
+assert(outputText.Text==firstPage,'previous page did not restore first page')
+setclipboard=nil
 findButton(currentGui,'×').Activated:Fire()
 clock=clock+0.6; flushDelayedTasks()
 assert(not playerGui:FindFirstChild('UFTracker'),'closed UI retained delayed report')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/single-test-copy/explicit text/stale clipboard/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/UI targets/JSON fallback/single-test-copy/paged text/refresh/stale clipboard/unsupported input, toggle and cleanup')
