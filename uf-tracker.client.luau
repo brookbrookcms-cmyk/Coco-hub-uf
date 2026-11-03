@@ -265,7 +265,7 @@ local function label(text, x, y, width, height)
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · CATCH v10", 12, 4, 120, 26)
+local title = label("UF · CATCH v11", 12, 4, 120, 26)
 title.Active = true
 local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
@@ -380,7 +380,7 @@ local function buildResult()
             table.insert(catchboxes, ok and info or { error = tostring(info) })
         end
     end
-    local data = { schema = 10, build = "held-input-animation-probe-v10", placeId = tostring(game.PlaceId),
+    local data = { schema = 11, build = "clear-target-input-v11", placeId = tostring(game.PlaceId),
         placeVersion = tostring(game.PlaceVersion), elapsed = os.clock() - started,
         enabled = running, config = config, status = status.Text, lastError = runtimeError,
         input = { realTapsObserved = realTapCount, lastResult = lastInputResult,
@@ -396,7 +396,7 @@ local function buildResult()
         pendingMove = pendingMove and pendingMove.id or "none", activeBalls = balls,
         localCatchboxes = catchboxes, events = events,
         outcome = "Client observations only; catches not confirmed" }
-    return "UF COPY RESULT v10\n" .. HttpService:JSONEncode(data)
+    return "UF COPY RESULT v11\n" .. HttpService:JSONEncode(data)
 end
 local function showResult(text)
     report.Text, report.Visible = text, true
@@ -518,22 +518,40 @@ requestCatchTap = function(saved, source)
         saved.tapAttempted = true -- Exactly one input attempt per movement attempt.
     end
     local viewport = gui.AbsoluteSize
-    local point = lastRealTap
-    if not point or point.X < 0 or point.Y < 0 or point.X >= viewport.X or point.Y >= viewport.Y
-        or tapHitsPanel(point) then
-        point = nil
-        for _, candidate in ipairs({ Vector2.new(viewport.X * 0.5, viewport.Y * 0.4),
-            Vector2.new(viewport.X * 0.25, viewport.Y * 0.4), Vector2.new(viewport.X * 0.75, viewport.Y * 0.4) }) do
-            if not tapHitsPanel(candidate) then point = candidate; break end
-        end
-    end
     local beforeAnimations = animationSnapshot()
     local errors, dispatched, method = {}, false, "none"
     local insetOk, inset = pcall(function() return GuiService:GetGuiInset() end)
     if not insetOk then inset = Vector2.new(0, 0); table.insert(errors, "GUI inset unavailable") end
-    -- Recorded TouchTap positions and GUI coordinates exclude the top inset on the
-    -- reported client. Engine input consumes screen coordinates: convert once only.
-    local screenPoint = point and Vector2.new(point.X + inset.X, point.Y + inset.Y)
+    local point, screenPoint
+    local targetChecks = {}
+    local coreOk, core = pcall(function() return game:GetService("CoreGui") end)
+    -- Recorded taps may have come from game controls; never use them as injection targets.
+    for _, candidate in ipairs({ Vector2.new(viewport.X * 0.5, viewport.Y * 0.5),
+        Vector2.new(viewport.X * 0.6, viewport.Y * 0.45), Vector2.new(viewport.X * 0.4, viewport.Y * 0.55),
+        Vector2.new(viewport.X * 0.7, viewport.Y * 0.5), Vector2.new(viewport.X * 0.3, viewport.Y * 0.5) }) do
+        local screen = Vector2.new(candidate.X + inset.X, candidate.Y + inset.Y)
+        local check = { point = { x = screen.X, y = screen.Y }, hits = {}, blockers = {},
+            playerGuiInspected = false, coreGuiInspected = false }
+        if tapHitsPanel(candidate) then table.insert(check.blockers, "UF tracker panel") end
+        local function inspect(container, field)
+            local ok, hits = pcall(function() return container:GetGuiObjectsAtPosition(screen.X, screen.Y) end)
+            check[field] = ok
+            if not ok then return end
+            for i, object in ipairs(hits) do
+                if i > 16 then break end
+                local path = object:GetFullName()
+                local blocking = object.Visible and (object.Active or object:IsA("TextButton")
+                    or object:IsA("ImageButton") or object:IsA("TextBox"))
+                table.insert(check.hits, { path = path, class = object.ClassName, active = object.Active,
+                    visible = object.Visible, blocking = blocking })
+                if blocking then table.insert(check.blockers, path) end
+            end
+        end
+        inspect(playerGui, "playerGuiInspected")
+        if coreOk and core then inspect(core, "coreGuiInspected") end
+        table.insert(targetChecks, check)
+        if #check.blockers == 0 then point, screenPoint = candidate, screen; break end
+    end
     if point then
         ignoreTapUntil = os.clock() + 0.35
         lastInjectedScreenPoint = screenPoint
@@ -557,7 +575,7 @@ requestCatchTap = function(saved, source)
                     releaseAt = os.clock() + config.tapHoldSeconds, release = release }
             end
         else table.insert(errors, tostring(service)) end
-    else table.insert(errors, "No tap point outside tracker UI") end
+    else table.insert(errors, "All central tap targets overlap active UI") end
     lastInputResult = dispatched and ("dispatched_" .. method) or "unsupported_or_blocked"
     if #inputAnimationProbes >= 8 then table.remove(inputAnimationProbes, 1) end
     table.insert(inputAnimationProbes, { at = os.clock() + 0.25, record = record,
@@ -565,7 +583,7 @@ requestCatchTap = function(saved, source)
     emit("catch_input", record, { source = source, method = method, dispatched = dispatched,
         point = point and { x = point.X, y = point.Y },
         screenPoint = screenPoint and { x = screenPoint.X, y = screenPoint.Y },
-        guiInset = { x = inset.X, y = inset.Y }, errors = errors,
+        guiInset = { x = inset.X, y = inset.Y }, targetChecks = targetChecks, errors = errors,
         result = lastInputResult, outcome = "Input dispatch does not prove catch activation" })
 end
 local function updatePendingMove(now)
