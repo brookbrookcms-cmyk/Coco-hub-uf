@@ -167,62 +167,98 @@ orb.Name, orb.Color3, orb.Transparency = "UFDetectionOrb", Color3.fromRGB(175, 7
 orb.AlwaysOnTop, orb.ZIndex, orb.Parent = false, 0, gui
 
 local frame = Instance.new("Frame")
-frame.Size, frame.Position = UDim2.fromOffset(310, 300), UDim2.new(0, 16, 0.2, 0)
+frame.Size, frame.Position = UDim2.fromOffset(210, 112), UDim2.new(0, 16, 0.2, 0)
 frame.BackgroundColor3, frame.Parent = Color3.fromRGB(22, 18, 30), gui
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
-local function label(text, y, height)
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+local function label(text, x, y, width, height)
     local item = Instance.new("TextLabel")
-    item.Size, item.Position = UDim2.new(1, -24, 0, height), UDim2.fromOffset(12, y)
+    item.Size, item.Position = UDim2.fromOffset(width, height), UDim2.fromOffset(x, y)
     item.BackgroundTransparency, item.TextColor3 = 1, Color3.fromRGB(235, 225, 250)
-    item.Font, item.TextSize, item.TextWrapped = Enum.Font.Gotham, 14, true
+    item.Font, item.TextSize = Enum.Font.Gotham, 12
+    item.TextXAlignment = Enum.TextXAlignment.Left
     item.Text, item.Parent = text, frame
     return item
 end
-local title = label("UF · FOOTBALL TRACKER", 8, 32)
+local title = label("UF · ORB", 12, 4, 120, 26)
 title.Active = true
-local status = label("Waiting for match structure", 44, 85)
-local function button(text, x, y, width, fn)
+local function button(text, x, y, width, height, fn)
     local item = Instance.new("TextButton")
-    item.Text, item.Size, item.Position = text, UDim2.fromOffset(width, 34), UDim2.fromOffset(x, y)
+    item.Text, item.Size, item.Position = text, UDim2.fromOffset(width, height), UDim2.fromOffset(x, y)
     item.BackgroundColor3, item.TextColor3 = Color3.fromRGB(85, 40, 120), Color3.new(1, 1, 1)
-    item.Font, item.TextSize, item.Parent = Enum.Font.Gotham, 13, frame
-    Instance.new("UICorner", item)
+    item.Font, item.TextSize, item.Parent = Enum.Font.Gotham, 12, frame
+    Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
     connect(item.Activated, fn)
     return item
 end
-local radiusLabel = label("Orb radius: 20 studs", 130, 24)
-local function radius(delta)
-    config.radius = math.clamp(config.radius + delta, 5, 100)
-    radiusLabel.Text = "Orb radius: " .. config.radius .. " studs"
+local radiusLabel = label("Radius · 20 studs", 12, 34, 130, 24)
+local toggle
+local function setEnabled(enabled)
+    running, visible = enabled, enabled
+    toggle.Text = enabled and "ON" or "OFF"
+    toggle.BackgroundColor3 = enabled and Color3.fromRGB(123, 56, 185) or Color3.fromRGB(65, 60, 72)
     for _, record in pairs(records) do record.relative = nil end
 end
-button("−5", 12, 160, 65, function() radius(-5) end)
-button("+5", 85, 160, 65, function() radius(5) end)
-button("Orb", 158, 160, 65, function() visible = not visible end)
-local pause
-pause = button("Pause", 12, 202, 90, function()
-    running = not running
-    pause.Text = running and "Pause" or "Resume"
-    for _, record in pairs(records) do record.relative = nil end
+toggle = button("ON", 150, 34, 48, 24, function() setEnabled(not running) end)
+setEnabled(running)
+-- A wide transparent hit target makes the narrow track usable with a finger.
+local slider = Instance.new("TextButton")
+slider.Name, slider.Text = "RadiusSlider", ""
+slider.Size, slider.Position = UDim2.fromOffset(186, 28), UDim2.fromOffset(12, 60)
+slider.BackgroundTransparency, slider.AutoButtonColor, slider.Parent = 1, false, frame
+local track = Instance.new("Frame")
+track.Size, track.Position = UDim2.new(1, 0, 0, 4), UDim2.new(0, 0, 0.5, -2)
+track.BackgroundColor3, track.BorderSizePixel, track.Parent = Color3.fromRGB(60, 48, 75), 0, slider
+Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+local fill = Instance.new("Frame")
+fill.BackgroundColor3, fill.BorderSizePixel, fill.Parent = Color3.fromRGB(183, 100, 255), 0, track
+Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+local knob = Instance.new("Frame")
+knob.Size, knob.AnchorPoint = UDim2.fromOffset(14, 14), Vector2.new(0.5, 0.5)
+knob.BackgroundColor3, knob.BorderSizePixel, knob.Parent = Color3.fromRGB(230, 205, 255), 0, track
+Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+local function setRadius(value)
+    local rounded = math.clamp(math.floor(value + 0.5), 5, 100)
+    if rounded ~= config.radius then
+        config.radius = rounded
+        for _, record in pairs(records) do record.relative = nil end
+    end
+    local alpha = (config.radius - 5) / 95
+    radiusLabel.Text = "Radius · " .. config.radius .. " studs"
+    fill.Size, knob.Position = UDim2.new(alpha, 0, 1, 0), UDim2.new(alpha, 0, 0.5, 0)
+    orb.Radius = config.radius
+end
+setRadius(config.radius)
+local sliderInput
+local function slide(input)
+    local width = slider.AbsoluteSize.X
+    if width > 0 then setRadius(5 + 95 * math.clamp((input.Position.X - slider.AbsolutePosition.X) / width, 0, 1)) end
+end
+connect(slider.InputBegan, function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderInput = input
+        slide(input)
+    end
 end)
+connect(UserInputService.InputChanged, function(input)
+    if sliderInput and (input == sliderInput or
+        (sliderInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement)) then
+        slide(input)
+    end
+end)
+connect(UserInputService.InputEnded, function(input) if input == sliderInput then sliderInput = nil end end)
+local status = label("Waiting for football", 12, 88, 186, 18)
+status.TextSize = 10
 local report = Instance.new("TextBox")
-report.Size, report.Position = UDim2.fromOffset(286, 100), UDim2.fromOffset(12, 300)
+report.Size, report.Position = UDim2.fromOffset(210, 130), UDim2.fromOffset(0, 118)
 report.MultiLine, report.ClearTextOnFocus, report.TextEditable = true, false, true
-report.TextSize, report.TextColor3, report.BackgroundColor3 = 12, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
+report.TextSize, report.TextColor3, report.BackgroundColor3 = 11, Color3.new(1, 1, 1), Color3.fromRGB(30, 25, 40)
 report.TextWrapped, report.Visible, report.Parent = true, false, frame
-button("Report", 110, 202, 90, function()
+button("…", 146, 4, 24, 24, function()
     report.Text = HttpService:JSONEncode({ version = 1, config = config, totalEvents = eventCount,
         retainedEvents = #events, outcomes = "Unconfirmed client observations", events = events })
     report.Visible = not report.Visible
-    frame.Size = UDim2.fromOffset(310, report.Visible and 412 or 300)
     if report.Visible then report:CaptureFocus() end
 end)
-local reopen = Instance.new("TextButton")
-reopen.Text, reopen.Size, reopen.Position = "UF", UDim2.fromOffset(48, 40), UDim2.fromOffset(16, 100)
-reopen.Visible, reopen.Parent = false, gui
-connect(reopen.Activated, function() frame.Visible, reopen.Visible = true, false end)
-button("Hide", 208, 202, 90, function() frame.Visible, reopen.Visible = false, true end)
-label("Report opens selectable text. Contacts ≠ catches.", 242, 24)
 local function cleanup()
     if closed then return end
     closed = true
@@ -234,10 +270,10 @@ local function cleanup()
     table.clear(events)
     gui:Destroy()
 end
-button("Close", 208, 268, 90, cleanup)
+button("×", 174, 4, 24, 24, cleanup)
 connect(shutdown.Event, cleanup)
 connect(gui.Destroying, cleanup)
--- Drag from title with either mouse or a single touch.
+-- Header dragging is independent of slider dragging, for mouse and touch.
 local drag, dragStart, frameStart
 connect(title.InputBegan, function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -245,11 +281,12 @@ connect(title.InputBegan, function(input)
     end
 end)
 connect(UserInputService.InputChanged, function(input)
-    if drag and (input == drag or input.UserInputType == Enum.UserInputType.MouseMovement) then
+    if drag and (input == drag or
+        (drag.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement)) then
         local delta = input.Position - dragStart
         local viewport = gui.AbsoluteSize
-        frame.Position = UDim2.fromOffset(math.clamp(frameStart.X.Offset + delta.X, 0, math.max(0, viewport.X - 310)),
-            math.clamp(frameStart.Y.Scale * viewport.Y + frameStart.Y.Offset + delta.Y, 0, math.max(0, viewport.Y - 40)))
+        frame.Position = UDim2.fromOffset(math.clamp(frameStart.X.Offset + delta.X, 0, math.max(0, viewport.X - 210)),
+            math.clamp(frameStart.Y.Scale * viewport.Y + frameStart.Y.Offset + delta.Y, 0, math.max(0, viewport.Y - 112)))
     end
 end)
 connect(UserInputService.InputEnded, function(input) if input == drag then drag = nil end end)
@@ -297,10 +334,9 @@ connect(RunService.Heartbeat, function()
     end
     if now - lastUi >= 0.2 then
         lastUi = now
-        status.Text = string.format("%s · %d events\n%s\n%s", running and "Tracking" or "Paused", eventCount,
-            nearestRecord and (nearestRecord.id .. " · " .. nearestRecord.state) or "No eligible football / character",
-            nearestDistance and string.format("%.1f studs · %.1f studs/s", nearestDistance, nearest.AssemblyLinearVelocity.Magnitude)
-                or (fieldContainer() and "Match structure found" or "Waiting for observed UF match hierarchy"))
+        status.Text = not running and "OFF · orb disabled" or (nearestRecord
+            and string.format("%s · %.1f studs", nearestRecord.id, nearestDistance)
+            or (fieldContainer() and "Waiting for football" or "Waiting for UF match"))
     end
 end)
 discover()
