@@ -54,7 +54,7 @@ local function new(class)
         'InputBegan','InputEnded','InputChanged','Activated','Event','DescendantAdded',
         'Heartbeat','CharacterRemoving'}) do obj._signals[name]=signal() end
     setmetatable(obj,{
-        __index=function(t,k) return methods[k] or t._signals[k] or t._props[k] end,
+        __index=function(t,k) if k=="ClassName" then return t._class end; return methods[k] or t._signals[k] or t._props[k] end,
         __newindex=function(t,k,value)
             t._props[k]=value
             if k=='CFrame' then t._props.Position=value.Position end
@@ -101,7 +101,20 @@ local function child(parent,name,class)
 end
 local services={Workspace=new('Workspace'),Players=new('Players'),RunService=new('RunService'),
     UserInputService=new('UserInputService'),HttpService=new('HttpService')}
-function services.HttpService:JSONEncode(_) return '{}' end
+local lastReport
+function services.HttpService:JSONEncode(data)
+    local function serializable(value)
+        local kind = type(value)
+        assert(kind ~= 'function' and kind ~= 'userdata', 'non-JSON value in result')
+        if kind == 'table' then
+            assert(not value._class, 'Instance in result')
+            for _, entry in pairs(value) do serializable(entry) end
+        end
+    end
+    serializable(data)
+    lastReport = data
+    return '{"mockJSON":true}'
+end
 local player=child(services.Players,'Tester','Player')
 services.Players.LocalPlayer=player
 local playerGui=child(player,'PlayerGui','PlayerGui')
@@ -141,6 +154,25 @@ touch.Position=v(198,70,0); services.UserInputService.InputChanged:Fire(touch)
 assert(orb.Radius==20,'released slider still dragging')
 step()
 assert(root.Position.X==0,'outside ball must not move player')
+local copy = findButton(gui,'Copy Result')
+local copied
+setclipboard = function(text) copied=text end
+copy.Activated:Fire()
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v3',1,true), 'clipboard success failed')
+assert(lastReport.schema==3 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
+assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
+setclipboard = nil
+copy.Activated:Fire()
+local textBox = assert(panel:FindFirstChild('ResultText'))
+assert(textBox.Visible and textBox.SelectionStart==1, 'missing-clipboard selectable fallback failed')
+setclipboard = function() error('clipboard blocked') end
+copy.Activated:Fire()
+assert(textBox.Visible and textBox.Text:find('clipboard blocked',1,true), 'clipboard-error fallback failed')
+toclipboard = function(text) copied=text end
+copy.Activated:Fire()
+assert(not textBox.Visible and copy.Text=='Copied! Send result', 'alternate clipboard fallback failed')
+setclipboard, toclipboard = nil, nil
 -- Fresh eligible ball discovered inside the orb: reproduces the reported no-trigger case.
 ball:Destroy()
 ball=child(field,'Football','MeshPart')
@@ -148,6 +180,8 @@ ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,
 services.Workspace.DescendantAdded:Fire(ball)
 step()
 assert(root.Position.X==10,'inside-first trigger failed to move')
+copy.Activated:Fire()
+assert(lastReport.attempts==1 and lastReport.pendingMove~='none', 'attempt diagnostic missing')
 step()
 assert(root.Position.X==0,'next-step restoration failed')
 step()
@@ -174,4 +208,4 @@ local replacement=playerGui:FindFirstChild('UFTracker')
 dofile(path)
 assert(replacement._destroyed and root.Position.X==0,'duplicate execution did not restore/clean prior copy')
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, touch slider, trigger, return, dedup, toggle, close and duplicate execution')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, trigger, return, toggle and cleanup')
