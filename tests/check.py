@@ -42,6 +42,13 @@ assert(segmentDistance(v(30,0,0),v(30,0,0)) == 30, 'stationary')
 assert(segmentDistance(v(30,0,0),v(40,0,0)) == 30, 'moving away')
 assert(segmentDistance(v(30,0,0),v(10,0,0)) == 10, 'outside to inside')
 '''
+    cases += """
+assert(entersOrb(nil, v(10,0,0), 20, false), 'first sample inside')
+assert(not entersOrb(nil, v(30,0,0), 20, false), 'first sample outside')
+assert(entersOrb(v(-30,0,0), v(30,0,0), 20, true), 'sampled crossing')
+assert(not entersOrb(v(-30,0,0), v(30,0,0), 20, false), 'invalid segment')
+assert(not entersOrb(v(-30,25,0), v(30,25,0), 20, true), 'orb near miss')
+"""
     restoration = source.split('local pendingMove', 1)[1].split('local function snapshot(ball)', 1)[0]
     restore_setup = """
 local records = { { relative = 1, rootPosition = 2, rootRef = 3 } }
@@ -77,6 +84,6 @@ assert(root.CFrame == 99 and not observed[3].restored, 'dead character guard')
     lib.luaL_openlibs(state)
     check(lib.luaL_loadstring(state, (harness + 'local function segmentDistance(a, b)' + helper + cases + restore_setup + 'local pendingMove' + restoration + restore_cases).encode()))
     check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
-    print('PASS: syntax, six geometry cases and restoration/cancellation guards; Roblox APIs not executed')
+    print('PASS: syntax, geometry, inside-first detection and restoration/cancellation guards; Roblox APIs not executed')
 finally:
     lib.lua_close(state)
