@@ -8,17 +8,19 @@ step. It makes no remote calls and cannot confirm server catch validation. Movem
 may be visible, rejected or corrected; this is not guaranteed catching.
 
 Run the complete file in a Roblox client environment. It uses standard Roblox APIs,
-with no executor-specific functions, downloads, clipboard APIs, or external libraries.
+with no downloads or external libraries. Clipboard functions are optional and are only used when Copy Result is pressed.
 Delta and other executor compatibility requires live testing; it is not certified.
 
 ## Controls
 
-The compact panel is 210 × 112 pixels.
+The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v2 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v3 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
-- The … button opens selectable diagnostic JSON below the panel.
+- Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
+  If unavailable or blocked, selectable text opens below the panel for manual copying.
+- The … button opens/closes the selectable diagnostic report without using the clipboard.
 - × closes the script and cleans up. Running again replaces the prior instance.
 
 Load the current version in an environment supporting HttpGet and loadstring:
@@ -113,3 +115,22 @@ count). `UF match path not found` means the observed hierarchy is absent in this
 `No ball` means no eligible ball is currently tracked. Runtime callback errors appear
 in the status and diagnostic report, with throttled console warnings. These observations
 can identify discovery, trigger or local movement failures; a try does not prove a catch.
+
+## Sending a failure report
+
+Run the latest loader (the title should say `UF · CATCH v3`), leave it ON during a pass
+that should enter the orb, then press **Copy Result** and paste the result into this
+conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
+select and copy the text opened below the panel. The script never sends reports anywhere.
+
+The report includes build/place IDs, expected path presence, targeted field child names,
+character readiness, local CatchBox snapshots, active football IDs/positions/speeds,
+last detection blocker per ball, attempt count, callback errors, and the latest 400 events.
+It includes observed player names/paths from gameplay. Reports distinguish disabled,
+missing root, anchored/slow ball, position jumps, outside orb, previously triggered and
+player-associated states. Movement skips also record reasons (dead, seated, missing ball,
+etc.). No report field asserts that the server accepted a catch.
+
+Local mock checks also cover clipboard success, missing clipboard, throwing clipboard,
+alternate clipboard fallback, selectable text and live diagnostic fields. Actual Delta
+clipboard support and UF behavior still require the report from a real session.
