@@ -85,6 +85,21 @@ assert(root.CFrame == 99 and not observed[3].restored, 'dead character guard')
     check(lib.luaL_loadstring(state, (harness + 'local function segmentDistance(a, b)' + helper + cases + restore_setup + 'local pendingMove' + restoration + restore_cases).encode()))
     check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
     print('PASS: syntax, geometry, inside-first detection and restoration/cancellation guards; Roblox APIs not executed')
+    encoding = source.split('local function jsonSafe', 1)[1].split('local lastRealTap', 1)[0]
+    encoding_cases = """
+local input = { [1]='numeric-key', label='text', nested={ callback=function() end }, bad=math.huge }
+input.self=input
+local warnings={}
+local clean=jsonSafe(input,{},0,warnings,'test',{remaining=200})
+assert(clean['1']=='numeric-key' and clean.label=='text', 'mixed keys not normalized')
+assert(clean.self=='<cycle>' and clean.bad=='<non-finite number>', 'unsafe values not normalized')
+assert(type(clean.nested.callback)=='string' and #warnings>=3,'unsupported value not diagnosed')
+local array=jsonSafe({1,2,3},{},0,{},'test',{remaining=200})
+assert(array[1]==1 and array[3]==3,'array layout changed')
+assert(plainReport(clean):find('result.label = text',1,true),'plain renderer lost diagnostic fields')
+"""
+    check(lib.luaL_loadstring(state, ('local function jsonSafe' + encoding + encoding_cases).encode()))
+    check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
     for reverse in ('true', 'false'):
         runtime = "TEST_HEARTBEAT_REVERSE = " + reverse + "\nTEST_SCRIPT_PATH = " + repr(str(root / 'uf-tracker.client.luau')) + "\n" + (root / 'tests/runtime.lua').read_text()
         check(lib.luaL_loadstring(state, runtime.encode()))
