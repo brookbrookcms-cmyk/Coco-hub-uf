@@ -42,9 +42,41 @@ assert(segmentDistance(v(30,0,0),v(30,0,0)) == 30, 'stationary')
 assert(segmentDistance(v(30,0,0),v(40,0,0)) == 30, 'moving away')
 assert(segmentDistance(v(30,0,0),v(10,0,0)) == 10, 'outside to inside')
 '''
+    restoration = source.split('local pendingMove', 1)[1].split('local function snapshot(ball)', 1)[0]
+    restore_setup = """
+local records = { { relative = 1, rootPosition = 2, rootRef = 3 } }
+local player, observed = {}, {}
+local function emit(kind, record, data) observed[#observed+1] = data end
+"""
+    restore_cases = """
+local character = {}
+local root = { IsDescendantOf = function(self, other) return other == character end }
+local humanoid = { Health = 100 }
+player.Character = character
+local function saved()
+    return { root = root, character = character, humanoid = humanoid,
+        cframe = 10, linear = 20, angular = 30, id = 'B0001' }
+end
+pendingMove = saved()
+restoreMove('disabled')
+assert(root.CFrame == 10 and root.AssemblyLinearVelocity == 20 and root.AssemblyAngularVelocity == 30)
+assert(pendingMove == nil and records[1].relative == nil and observed[1].restored)
+restoreMove('closed')
+assert(#observed == 1, 'restoration must be idempotent')
+root.CFrame = 99
+player.Character = {}
+pendingMove = saved()
+restoreMove('respawn')
+assert(root.CFrame == 99 and not observed[2].restored, 'replacement character guard')
+player.Character = character
+humanoid.Health = 0
+pendingMove = saved()
+restoreMove('death')
+assert(root.CFrame == 99 and not observed[3].restored, 'dead character guard')
+"""
     lib.luaL_openlibs(state)
-    check(lib.luaL_loadstring(state, (harness + 'local function segmentDistance(a, b)' + helper + cases).encode()))
+    check(lib.luaL_loadstring(state, (harness + 'local function segmentDistance(a, b)' + helper + cases + restore_setup + 'local pendingMove' + restoration + restore_cases).encode()))
     check(lib.lua_pcallk(state, 0, 0, 0, 0, None))
-    print('PASS: syntax and six segment-distance cases; Roblox APIs not executed')
+    print('PASS: syntax, six geometry cases and restoration/cancellation guards; Roblox APIs not executed')
 finally:
     lib.lua_close(state)
