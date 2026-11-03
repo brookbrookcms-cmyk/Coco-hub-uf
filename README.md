@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v14 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v15 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - TEST + COPY runs the standalone input test and automatically generates/displays a report after 0.5 seconds; it also works with tracking OFF.
@@ -125,7 +125,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v14`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v15`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -321,3 +321,18 @@ tests supersede prior timers, and closing invalidates delayed output.
 The mock now starts TextBoxes with Roblox's default label and verifies it is cleared,
 then checks immediate progress, delayed output without any tracking Heartbeat, and
 cleanup. Catch activation remains unverified; this change repairs the reporting flow.
+
+## v15 bounded report previews and explicit snapshots
+
+Reports are snapshots, not continuously updating text. The panel now labels completed
+output Snapshot #N / page X/Y, labels pending tests separately, and offers Refresh to
+create a new snapshot. The full report still goes to the clipboard; the TextBox renders
+at most 1,600 bytes per page instead of laying out an entire large wrapped report on a
+mobile client. Previous/next controls allow manual copying when clipboard APIs fail.
+UTF-8 page boundaries are adjusted to avoid splitting characters.
+
+This addresses a possible TextBox layout performance problem; no live performance
+measurement has established the cause of the user's freeze. Local tests check long
+reports, bounded preview size, full clipboard payload, previous/next controls and new
+IDs on Refresh. A report stuck on Running input test remains a different failure from
+a completed snapshot whose text stays unchanged. Catch activation remains unverified.
