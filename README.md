@@ -20,7 +20,7 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v9 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v10 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
 - Tap sends a standalone input test without moving the character; it also works with tracking OFF.
@@ -124,7 +124,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v9`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v10`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -232,3 +232,21 @@ GUI point, screen point and inset. The regression mock uses a 58-pixel inset, ge
 TouchTap from injected engine touch events, and checks repeated test presses for stable
 coordinates and correct classification. The live catch animation/acceptance still has
 not been established. No successful dispatch is reported as a confirmed catch.
+
+## v10 held-input diagnostic experiment
+
+The user confirmed v9 still produced no normal catch animation. v10 tests a 0.06-second
+press spanning multiple Heartbeats instead of sending touch down/up in one callback.
+This is a hypothesis about deferred input processing, not a confirmed cause or catch fix.
+Overlapping presses are suppressed; OFF, close and movement cancellation release any
+pending input. Release attempts and actual duration are logged separately.
+
+Copy Result now includes touch/mouse InputBegan/InputEnded observations, press-pending
+status, current animation tracks, and before/after (0.25 s) animation snapshots for each
+input test. Animation names/IDs are evidence only; no UF catch animation ID is hard-coded.
+If Animator is unavailable, that is explicitly reported. There are no invented game
+remotes and successful input calls remain distinct from catch activation/possession.
+
+Tests cover delayed release duration, observed input events, animation probe data,
+overlap suppression, OFF cancellation, and mouse fallback as well as the earlier
+movement, clipboard and association cases. None of these mocks validate UF handlers.
