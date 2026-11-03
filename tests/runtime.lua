@@ -129,6 +129,9 @@ local playerGui=child(player,'PlayerGui','PlayerGui')
 local character=child(services.Workspace,'Tester','Model'); player.Character=character
 local root=child(character,'HumanoidRootPart','Part')
 local humanoid=child(character,'Humanoid','Humanoid'); humanoid.Health=100; humanoid.Sit=false
+local animator=child(humanoid,'Animator','Animator')
+local playingAnimations={{Name='Idle',Animation={AnimationId='rbxassetid://idle'},Priority='Idle',IsPlaying=true}}
+function animator:GetPlayingAnimationTracks() return playingAnimations end
 local miniGames=child(services.Workspace,'MiniGames')
 local session=child(miniGames,'test-session')
 local replicated=child(session,'Replicated')
@@ -173,8 +176,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v9',1,true), 'clipboard success failed')
-assert(lastReport.schema==9 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v10',1,true), 'clipboard success failed')
+assert(lastReport.schema==10 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -201,12 +204,22 @@ step()
 assert(root.Position.X>3.9 and root.Position.X<4.1,'slower approach intermediate position wrong')
 step()
 assert(root.Position.X>7.9 and root.Position.X<8.1,'approach should continue')
-local tapCount=0
+local tapCount, tapDownCount=0,0
+local activeTouch
 local injectedPoints={}
 services.VirtualInputManager=new('VirtualInputManager')
 function services.VirtualInputManager:SendTouchEvent(id,state,x,y)
     assert(state==0 or state==2,'invalid touch state')
+    if state==0 then
+        tapDownCount=tapDownCount+1
+        activeTouch={id=id,at=clock}
+        playingAnimations={{Name='TestCatch',Animation={AnimationId='rbxassetid://test-catch'},Priority='Action',IsPlaying=true}}
+        services.UserInputService.InputBegan:Fire({UserInputType=Enum.UserInputType.Touch,UserInputState='Begin'},false)
+    end
     if state==2 then
+        assert(activeTouch and activeTouch.id==id,'unpaired touch release')
+        activeTouch=nil
+        services.UserInputService.InputEnded:Fire({UserInputType=Enum.UserInputType.Touch,UserInputState='End'},false)
         tapCount=tapCount+1
         injectedPoints[#injectedPoints+1]={x=x,y=y}
         services.UserInputService.TouchTap:Fire({Vector2.new(x,y-58)},false)
@@ -215,28 +228,52 @@ end
 -- A firesignal function must never short-circuit engine input in v8.
 firesignal=function() error('obsolete firesignal must not be called') end
 ball.Touched:Fire(catchbox)
-assert(tapCount==1,'local contact did not dispatch tap')
+assert(tapDownCount==1 and tapCount==0,'contact must press without same-callback release')
 step()
 assert(root.Position.X==10,'approach did not arrive at ball')
-assert(tapCount==1,'arrival duplicated contact tap')
-findButton(gui,'Tap').Activated:Fire()
-assert(tapCount==2,'manual Tap test did not send engine touch')
-for i=1,4 do findButton(gui,'Tap').Activated:Fire() end
+assert(tapDownCount==1 and tapCount==0,'arrival duplicated tap or released too early')
+assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
+step()
+assert(tapCount==1,'held touch did not release on later heartbeat')
+ball.Position=v(12,0,0)
+step()
+assert(root.Position.X==12,'hold should follow current ball position')
+step(); step(); step(); step()
+assert(root.Position.X==0,'hold timeout failed to restore')
+for i=1,5 do
+    findButton(gui,'Tap').Activated:Fire()
+    local count=tapDownCount
+    findButton(gui,'Tap').Activated:Fire()
+    assert(tapDownCount==count,'overlapping manual input was not suppressed')
+    step(); step()
+end
 for _,point in ipairs(injectedPoints) do
     assert(point.y==injectedPoints[1].y and point.y>58,'injected tap feedback drifted toward top bar')
 end
 copy.Activated:Fire()
 assert(lastReport.input.realTapsObserved==0 and lastReport.input.ignoredSyntheticTaps>=6,
     'synthetic events misclassified as real taps')
-local inputEvent
-for _,event in ipairs(lastReport.events) do if event.kind=='catch_input' then inputEvent=event.data end end
+local inputEvent, released, beganObserved, endedObserved
+for _,event in ipairs(lastReport.events) do
+    if event.kind=='catch_input' then inputEvent=event.data end
+    if event.kind=='catch_input_release' then released=event.data end
+    if event.kind=='engine_input_observed' and event.data.event=='InputBegan' then beganObserved=true end
+    if event.kind=='engine_input_observed' and event.data.event=='InputEnded' then endedObserved=true end
+end
 assert(inputEvent.screenPoint.y==inputEvent.point.y+58 and inputEvent.guiInset.y==58,'inset not converted once')
-assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
-ball.Position=v(12,0,0)
-step()
-assert(root.Position.X==12,'hold should follow current ball position')
-step(); step(); step(); step()
-assert(root.Position.X==0,'hold timeout failed to restore')
+assert(released and released.heldSeconds>=0.059 and released.released,'release hold duration not reported')
+assert(beganObserved and endedObserved,'engine input observations missing')
+local animationProbe
+for _,event in ipairs(lastReport.events) do
+    if event.kind=='input_animation_probe' and event.data.source=='local_catchbox_contact' then animationProbe=event.data end
+end
+assert(animationProbe and animationProbe.before.tracks[1].name=='Idle'
+    and animationProbe.after.tracks[1].name=='TestCatch','before/after animation probe missing')
+findButton(gui,'Tap').Activated:Fire()
+assert(activeTouch,'manual test should have a pending press')
+findButton(gui,'ON').Activated:Fire()
+assert(not activeTouch,'OFF must release pending input immediately')
+findButton(gui,'OFF').Activated:Fire()
 firesignal=nil
 services.VirtualInputManager=nil
 copy.Activated:Fire()
@@ -294,7 +331,7 @@ end
 ball=child(field,'Football','MeshPart')
 ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
 services.Workspace.DescendantAdded:Fire(ball)
-step(); step(); step(); step()
+step(); step(); step(); step(); step(); step()
 assert(#mouseEvents==2 and mouseEvents[1]==true and mouseEvents[2]==false,'mouse fallback did not release')
 findButton(currentInputGui,'Copy Result').Activated:Fire()
 assert(lastReport.input.lastResult=='dispatched_VirtualInputManager_mouse','mouse fallback not reported')
@@ -343,4 +380,4 @@ findButton(currentGui,'ON').Activated:Fire()
 assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, engine touch/manual test/dedup/coordinate feedback/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, held engine input/observations/manual test/dedup/coordinate feedback/unsupported input, toggle and cleanup')
