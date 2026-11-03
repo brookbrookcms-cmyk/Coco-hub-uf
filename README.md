@@ -20,10 +20,11 @@ Delta and other executor compatibility requires live testing; it is not certifie
 
 The compact panel is 210 × 142 pixels.
 
-- Drag the UF · CATCH v12 title to move the panel with mouse or touch.
+- Drag the UF · CATCH v13 title to move the panel with mouse or touch.
 - Drag or tap the slider to adjust radius from 5–100 studs, in one-stud steps.
 - ON/OFF controls orb visibility, detection and catch attempts; OFF immediately restores a pending move. Lifecycle diagnostics continue.
-- Tap sends a standalone input test without moving the character; it also works with tracking OFF.
+- TEST + COPY runs the standalone input test and automatically generates/displays a report after 0.5 seconds; it also works with tracking OFF.
+- Copy refreshes the current report without running another test.
 - Copy Result copies a diagnostic report using optional `setclipboard`/`toclipboard` APIs.
   If unavailable or blocked, selectable text opens below the panel for manual copying.
 - The … button opens/closes the selectable diagnostic report without using the clipboard.
@@ -124,7 +125,7 @@ can identify discovery, trigger or local movement failures; a try does not prove
 
 ## Sending a failure report
 
-Run the latest loader (the title should say `UF · CATCH v12`), leave it ON during a pass
+Run the latest loader (the title should say `UF · CATCH v13`), leave it ON during a pass
 that should enter the orb, then press **Copy Result** and paste the result into this
 conversation. `Copied! Send result` means a clipboard function succeeded; otherwise
 select and copy the text opened below the panel. The script never sends reports anywhere.
@@ -288,3 +289,22 @@ produce a smaller report containing the collection error, events and callback er
 Tests force JSONEncode to throw, insert non-finite position values, and exercise mixed
 keys, cycles and unsupported values, then check readable export. Catch behavior is
 unchanged from v11 and remains unverified.
+
+## v13 single-step test/report workflow
+
+The user reported pressing Tap while the pasted report remained byte-for-byte identical.
+That does not establish that the user skipped the test. v13 combines the input test and
+report capture in TEST + COPY, shows an immediate Testing status, then automatically
+builds a result after 0.5 seconds (after the input release and animation probe). It logs
+`ui_test_requested` and includes `manualTestCount` plus a unique per-session `reportId`.
+Repeated test presses reschedule export for the latest request. Closing cancels export.
+
+Every result remains visible below the compact panel even when the clipboard API returns
+successfully. The Copy button says Copy sent, not that the system clipboard was independently
+verified. If pasted contents remain old, select/copy the displayed report directly and
+check its reportId. Displaying a successfully copied report does not focus a TextBox or
+open the keyboard. Clipboard failure still opens selectable text.
+
+Tests cover a single combined activation, automatic delayed capture, matching clipboard
+and displayed contents, unique report IDs, and a clipboard function that silently keeps
+old contents. This workflow change does not establish working UF auto-catching.
