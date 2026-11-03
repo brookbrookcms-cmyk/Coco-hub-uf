@@ -104,7 +104,8 @@ local function child(parent,name,class)
     local obj=Instance.new(class or 'Folder',parent); obj.Name=name; return obj
 end
 local services={Workspace=new('Workspace'),Players=new('Players'),RunService=new('RunService'),
-    UserInputService=new('UserInputService'),HttpService=new('HttpService')}
+    UserInputService=new('UserInputService'),HttpService=new('HttpService'),GuiService=new('GuiService')}
+function services.GuiService:GetGuiInset() return Vector2.new(0,58), Vector2.new(0,0) end
 local lastReport
 function services.HttpService:JSONEncode(data)
     local function serializable(value)
@@ -172,8 +173,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v8',1,true), 'clipboard success failed')
-assert(lastReport.schema==8 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v9',1,true), 'clipboard success failed')
+assert(lastReport.schema==9 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -201,10 +202,15 @@ assert(root.Position.X>3.9 and root.Position.X<4.1,'slower approach intermediate
 step()
 assert(root.Position.X>7.9 and root.Position.X<8.1,'approach should continue')
 local tapCount=0
+local injectedPoints={}
 services.VirtualInputManager=new('VirtualInputManager')
 function services.VirtualInputManager:SendTouchEvent(id,state,x,y)
     assert(state==0 or state==2,'invalid touch state')
-    if state==2 then tapCount=tapCount+1 end
+    if state==2 then
+        tapCount=tapCount+1
+        injectedPoints[#injectedPoints+1]={x=x,y=y}
+        services.UserInputService.TouchTap:Fire({Vector2.new(x,y-58)},false)
+    end
 end
 -- A firesignal function must never short-circuit engine input in v8.
 firesignal=function() error('obsolete firesignal must not be called') end
@@ -215,6 +221,16 @@ assert(root.Position.X==10,'approach did not arrive at ball')
 assert(tapCount==1,'arrival duplicated contact tap')
 findButton(gui,'Tap').Activated:Fire()
 assert(tapCount==2,'manual Tap test did not send engine touch')
+for i=1,4 do findButton(gui,'Tap').Activated:Fire() end
+for _,point in ipairs(injectedPoints) do
+    assert(point.y==injectedPoints[1].y and point.y>58,'injected tap feedback drifted toward top bar')
+end
+copy.Activated:Fire()
+assert(lastReport.input.realTapsObserved==0 and lastReport.input.ignoredSyntheticTaps>=6,
+    'synthetic events misclassified as real taps')
+local inputEvent
+for _,event in ipairs(lastReport.events) do if event.kind=='catch_input' then inputEvent=event.data end end
+assert(inputEvent.screenPoint.y==inputEvent.point.y+58 and inputEvent.guiInset.y==58,'inset not converted once')
 assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
 ball.Position=v(12,0,0)
 step()
@@ -327,4 +343,4 @@ findButton(currentGui,'ON').Activated:Fire()
 assert(root.Position.X==beforeDisable,'OFF snapped back before local ancestry delivery')
 
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, engine touch/manual test/dedup/unsupported input, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, local/other association, engine touch/manual test/dedup/coordinate feedback/unsupported input, toggle and cleanup')
