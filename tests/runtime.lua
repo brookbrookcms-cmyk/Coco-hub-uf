@@ -31,6 +31,9 @@ Vector3 = { new=v, zero=v(0,0,0) }
 Vector2 = { new=function(x,y) return {X=x,Y=y} end }
 local cframeMt = {}
 cframeMt.__mul = function(a,b) return setmetatable({Position=a.Position,Rotation=b}, cframeMt) end
+cframeMt.__index = { Lerp=function(a,b,t)
+    return setmetatable({Position=a.Position+(b.Position-a.Position)*t,Rotation=a.Rotation},cframeMt)
+end }
 CFrame = { new=function(p) return setmetatable({Position=p,Rotation={}}, cframeMt) end }
 UDim = {new=function(s,o) return {Scale=s,Offset=o} end}
 UDim2 = {new=function(xs,xo,ys,yo) return {X=UDim.new(xs,xo),Y=UDim.new(ys,yo)} end}
@@ -125,6 +128,13 @@ local playerGui=child(player,'PlayerGui','PlayerGui')
 local character=child(services.Workspace,'Tester','Model'); player.Character=character
 local root=child(character,'HumanoidRootPart','Part')
 local humanoid=child(character,'Humanoid','Humanoid'); humanoid.Health=100; humanoid.Sit=false
+local miniGames=child(services.Workspace,'MiniGames')
+local session=child(miniGames,'test-session')
+local replicated=child(session,'Replicated')
+local hitboxes=child(replicated,'Hitboxes')
+local owner=child(hitboxes,player.Name)
+local catchbox=child(owner,'CatchBox','Part')
+catchbox.Position=v(0,-0.2,0); catchbox.Size=v(5.2,6.3,2.31)
 local field=services.Workspace
 for _,name in ipairs({'ParkMatchMap','Replicated','Fields','MatchField','Replicated'}) do field=child(field,name) end
 local ball=child(field,'Football','MeshPart')
@@ -162,8 +172,8 @@ local copy = findButton(gui,'Copy Result')
 local copied
 setclipboard = function(text) copied=text end
 copy.Activated:Fire()
-assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v4',1,true), 'clipboard success failed')
-assert(lastReport.schema==4 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
+assert(copy.Text=='Copied! Send result' and copied:find('UF COPY RESULT v5',1,true), 'clipboard success failed')
+assert(lastReport.schema==5 and lastReport.attempts==0 and lastReport.fieldPath[5].found, 'report metadata missing')
 assert(lastReport.activeBalls[1].lastGate=='outside_orb' and lastReport.character.rootFound, 'live blocker missing')
 assert(lastReport.fieldChildren[1].class=='MeshPart', 'targeted discovery context missing')
 setclipboard = nil
@@ -183,18 +193,29 @@ ball=child(field,'Football','MeshPart')
 ball.Anchored=false; ball.Position=v(10,0,0); ball.AssemblyLinearVelocity=v(-90,0,0)
 services.Workspace.DescendantAdded:Fire(ball)
 step()
-assert(root.Position.X==10,'inside-first trigger failed to move')
+assert(root.Position.X==0,'attempt should begin without snapping immediately')
 copy.Activated:Fire()
 assert(lastReport.attempts==1 and lastReport.pendingMove~='none', 'attempt diagnostic missing')
 step()
-assert(root.Position.X==0,'next-step restoration failed')
+assert(root.Position.X>3.9 and root.Position.X<4.1,'slower approach intermediate position wrong')
+step()
+assert(root.Position.X>7.9 and root.Position.X<8.1,'approach should continue')
+step()
+assert(root.Position.X==10,'approach did not arrive at ball')
+assert(math.abs(root.Position.Y-0.2)<1e-8,'CatchBox offset alignment failed')
+ball.Position=v(12,0,0)
+step()
+assert(root.Position.X==12,'hold should follow current ball position')
+step(); step(); step(); step()
+assert(root.Position.X==0,'hold timeout failed to restore')
 copy.Activated:Fire()
-local returned
+local returned, arrived
 for _,event in ipairs(lastReport.events) do
     if event.kind=='catch_attempt_return' then returned=event.data end
+    if event.kind=='catch_arrived' then arrived=event.data end
 end
-assert(returned and returned.heartbeatDelta>=1 and returned.heldSeconds>=0.039,
-    'return must wait for a later heartbeat, never the same dispatch')
+assert(arrived and returned and returned.heartbeatDelta>=8 and returned.heldSeconds>=0.30,
+    'approach and hold must span configured duration')
 step()
 assert(root.Position.X==0,'same instance triggered twice')
 -- OFF suppresses new balls, ON re-evaluates overlap.
@@ -205,7 +226,7 @@ ball.Anchored=false; ball.Position=v(15,0,0); ball.AssemblyLinearVelocity=v(-90,
 services.Workspace.DescendantAdded:Fire(ball)
 step(); assert(root.Position.X==0,'OFF still moved player')
 findButton(gui,'OFF').Activated:Fire()
-step(); assert(root.Position.X==15,'ON did not re-evaluate inside ball')
+step(); step(); assert(root.Position.X>5 and root.Position.X<7,'ON did not begin slow approach')
 findButton(gui,'ON').Activated:Fire()
 assert(root.Position.X==0,'OFF did not immediately restore')
 -- Close removes UI and listeners; rerun boots cleanly.
@@ -214,9 +235,14 @@ assert(not playerGui:FindFirstChild('UFTracker'),'close did not remove UI')
 step()
 dofile(path)
 assert(playerGui:FindFirstChild('UFTracker'),'rerun failed')
-step(); assert(root.Position.X==15,'rerun did not trigger inside ball')
+step(); step(); assert(root.Position.X>5 and root.Position.X<7,'rerun did not begin slow approach')
 local replacement=playerGui:FindFirstChild('UFTracker')
 dofile(path)
 assert(replacement._destroyed and root.Position.X==0,'duplicate execution did not restore/clean prior copy')
+step(); step()
+assert(root.Position.X>0,'new attempt should advance before ball destruction')
+ball:Destroy()
+step()
+assert(root.Position.X==0,'ball destruction during approach did not restore')
 assert(#failures==0,table.concat(failures,'\n'))
-print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, trigger, return, toggle and cleanup')
+print('PASS: full-script mock boot, slider, clipboard success/failure/fallback, reports, slow approach, following hold, return, toggle and cleanup')
